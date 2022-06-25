@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # molearn
 
 *molecular conformational spaces meet machine learning*
@@ -40,3 +41,7 @@ https://journals.aps.org/prx/abstract/10.1103/PhysRevX.11.011052)
 ## Contact ##
 
 If you have any issues or questions please contact use the contact at samuel.musson@durham.ac.uk
+=======
+# chanspace
+Exploring conformational space of ion channels with ML
+>>>>>>> ff96646df185edf2b43d58ca9a358e8ec3cb6c3c
