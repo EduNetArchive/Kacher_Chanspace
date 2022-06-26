@@ -51,6 +51,30 @@ def charge_dif(df):
     return maximal_idx, maximal_val, \
            minimal_idx, minimal_val 
 
+def alternative_rmsd2(traj): 
+    R = rms.RMSD(traj,  # universe to align
+                 traj,  # reference universe or atomgroup
+                 select='backbone',  # group to superimpose and calculate RMSD
+                 ref_frame=0)  # frame index of the reference
+    R.run()
+    
+    df = pd.DataFrame(R.results.rmsd)
+    
+    test1_idx = int(np.argmax(df[2]))
+    
+    R2 = rms.RMSD(traj,  # universe to align
+                 traj,  # reference universe or atomgroup
+                 select='backbone',  # group to superimpose and calculate RMSD
+                 ref_frame=test1_idx)  # frame index of the reference
+    R2.run()
+    
+    df2 = pd.DataFrame(R2.results.rmsd)
+    
+    test0_idx = int(np.argmax(df2[2]))
+    
+    return test0_idx, test1_idx
+
+
 def visualize_energy(network, dataset, num_atoms, lf, size=100, bounding_box=(0,0,1,1)):
     x1, y1, x2, y2 = bounding_box
     x = np.linspace(x1, x2, size)
@@ -134,8 +158,8 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
         img2 = Image.open("/tmp/fig2.png")
         return img, img2
     
-        
     return img
+
 
 def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
     network.train()
@@ -210,6 +234,7 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
     network.eval()
     
     interpolation_out = torch.zeros(20, num_atoms, 3)
+    interpolated_points = torch.zeros(20, 2)
     
     with torch.no_grad(): # don't need gradients for this bit
         test0_z = network.encode(test0.unsqueeze(0).float())
@@ -217,9 +242,11 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
 
         #interpolate between the encoded Z space for each network between test0 and test1
         for idx, t in enumerate(np.linspace(0, 1, 20)):
-            interpolation_out[idx] = network.decode(float(t)*test0_z + (1-float(t))*test1_z)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
+            point = float(t)*test0_z + (1-float(t))*test1_z
+            interpolated_points[idx] = point.squeeze().cpu().numpy()
+            interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
         interpolation_out *= dataset.stdval
-
+        
     img, log_img = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
     wandb.log({"img": wandb.Image(img, caption=f"epoch_{epoch:0>4}")})
     wandb.log({"log_img": wandb.Image(log_img, caption=f"epoch_{epoch:0>4}")})
@@ -228,6 +255,7 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
     mol = dataset.mol
     mol.coordinates = interpolation_out.numpy()
     mol.write_pdb(f'{pdbs_dir}/epoch_{epoch:0>4}_interpolation.pdb')
+    np.save(f'{checkpoints_dir}/points_epoch_{epoch:0>4}.pdb', interpolated_points)
 
 def create_dirs(args):
     root = os.path.join(args.output, args.experiment_name)
@@ -296,10 +324,14 @@ def main(args):
     num_atoms = dataset[0].shape[1]
 
     #with respect to rmsd: test0, test1 = dataset[20222], dataset[84990]
+
+    #with respect to rmsd: 
+    # test0_idx, test1_idx = alternative_rmsd2(traj)
+    # test0, test1 = dataset[test0_idx], dataset[test1_idx]
     
     df = pd.read_csv(args.qcharge_file,index_col = None)
-    maximal_idx, maximal_val, minimal_idx, minimal_val = charge_dif(df)
-    test0, test1 = dataset[minimal_idx], dataset[maximal_idx]
+    q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
+    test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
 
     test0 = test0.to(device)
     test1 = test1.to(device)
@@ -345,7 +377,7 @@ def main(args):
             verbose=args.wandb,
         )
 
-        #save interpolations between test0 and test1 every 5 epochs, if get_rmsd==True
+        #save interpolations between test0 and test1 every 5 epochs
         if args.verbose and (epoch + 1) % 5 == 0:
             validation(
                 epoch=epoch,
