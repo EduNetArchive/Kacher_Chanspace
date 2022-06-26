@@ -15,15 +15,10 @@ from argparse import ArgumentParser
 
 import biobox
 from molearn import Auto_potential, Autoencoder, load_data
-
-import mdtraj as md
 import nglview 
 
 import MDAnalysis as mda
-import MDAnalysis.tests.datafiles 
 from MDAnalysis.analysis import align, rms
-from MDAnalysis.tests.datafiles import TPR, XTC, PDB
-
 import plotly as py
 import plotly.express as px
 import plotly.graph_objects as go
