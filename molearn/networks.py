@@ -27,12 +27,21 @@ class ResidualBlock(nn.Module):
         #return torch.relu(x + self.conv_block(x))       #earlier runs were with 'return x + self.conv_block(x)' but not an issue (really?)
 
 class To2D(nn.Module):
-    def __init__(self):
+    def __init__(self, sigmoid=True, BN=False):
         super(To2D, self).__init__()
+        self.sigmoid = sigmoid
+        self.BN = BN
+        if BN:
+            self.batchnorm = nn.BatchNorm1d(1, affine=False) 
         pass
     def forward(self, x):
         z = torch.nn.functional.adaptive_avg_pool2d(x, output_size=(2,1))
-        z = torch.sigmoid(z)
+        if self.sigmoid:
+            z = torch.sigmoid(z)
+        if self.BN:
+            z = z.transpose(1,2)
+            z = self.batchnorm(z)
+            z = z.transpose(1,2)
         return z
 
 class From2D(nn.Module):
@@ -46,7 +55,7 @@ class From2D(nn.Module):
         return x
 
 class Autoencoder(nn.Module):
-    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None):
+    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False):
         '''
         Simple 1D convolutional Autoencoder with residueal blocks
 
@@ -75,7 +84,7 @@ class Autoencoder(nn.Module):
             for j in range(r):
                 eb.append(ResidualBlock(int(init_z*m**(i+1))))
         eb.append(nn.Conv1d(int(init_z*m**depth), latent_z, 4, 2, 1, bias=False))
-        eb.append(To2D())
+        eb.append(To2D(sigmoid=sigmoid, BN=BN))
         self.encoder = eb
         # decoder block
         db = nn.ModuleList()
@@ -115,3 +124,8 @@ class Autoencoder(nn.Module):
         for m in self.decoder:
             x = m(x)
         return x
+
+    def forward(self, x):
+        return self.decode(self.encode(x))
+    
+#These changes were necessary for parallelism in order to deal with large datasets i.e.
