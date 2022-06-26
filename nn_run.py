@@ -62,7 +62,7 @@ def check_rmsd(traj):
     return test0_idx, test1_idx
 
 
-def visualize_energy(network, dataset, num_atoms, lf, size=100, bounding_box=(0,0,1,1)):
+def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding_box=(0,0,1,1)):
     x1, y1, x2, y2 = bounding_box
     x = np.linspace(x1, x2, size)
     y = np.linspace(y1, y2, size)
@@ -73,9 +73,9 @@ def visualize_energy(network, dataset, num_atoms, lf, size=100, bounding_box=(0,
     losses_all = []
     for i in trange(0, len(z), 1): 
         z_batch = z[i:(i+1)]
-        z_batch=torch.tensor(z_batch).float().to(z_batch.device)
+        z_batch=torch.tensor(z_batch).float().to(device)
         out = network.decode(z_batch)[:, :, :num_atoms]
-        out *= dataset.stdval.reshape(3, 1).to(out.device)
+        out *= dataset.stdval.reshape(3, 1).to(device)
         bond_energy, angle_energy, torsion_energy, NB_energy = lf.get_loss(out)
 
         loss_f = (bond_energy + angle_energy + torsion_energy + NB_energy)
@@ -118,7 +118,8 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
     else:
         x1, y1, x2, y2 = bounding_box
 
-    img_array = visualize_energy(network, dataset, num_atoms, lf, size=size, bounding_box=(x1, y1, x2, y2))   
+    img_array = visualize_energy(network, dataset, num_atoms, lf, device,
+                                 size=size, bounding_box=(x1, y1, x2, y2))
     
     plt.scatter(img_conf[:, 0], img_conf[:, 1], c=np.arange(len(img_conf)), alpha=0.5, s=1, cmap='PiYG')
     plt.imshow(img_array, extent=(x1, x2, y1, y2), origin='lower')
@@ -232,7 +233,7 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
             point = float(t)*test0_z + (1-float(t))*test1_z
             interpolated_points[idx] = point.squeeze().cpu()
             interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
-        interpolation_out *= dataset.stdval.reshape(3, 1).to(device)
+        interpolation_out *= dataset.stdval
         
     img, log_img, points = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
 
@@ -320,11 +321,11 @@ def main(args):
     # test0_idx, test1_idx = check_rmsd(args.traj)
     # test0, test1 = dataset[test0_idx], dataset[test1_idx]
     
-    df = pd.read_csv(args.qcharge_file, index_col = None)
-    q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
-    test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
+    # df = pd.read_csv(args.qcharge_file, index_col = None)
+    # q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
+    # test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
 
-    # test0, test1 = dataset[33962], dataset[-10084] #qcharge
+    test0, test1 = dataset[33962], dataset[-10084] #qcharge
 
     test0 = test0.to(device)
     test1 = test1.to(device)
@@ -355,6 +356,23 @@ def main(args):
         wandb.config = cfg
 
     optimizer = torch.optim.Adam(network.parameters(), lr=cfg["learning_rate"], amsgrad=True)
+
+    validation(
+        epoch=epoch,
+        network=network,
+        test0=test0,
+        test1=test1,
+        dataset=dataset,
+        num_atoms=num_atoms,
+        dataloader=val_loader,
+        loss_function=lf,
+        device=device,
+        img_size=100,
+        pdbs_dir=pdbs_dir,
+        checkpoints_dir=checkpoints_dir,
+        verbose=args.wandb,
+    )
+    exit(0)
 
     #training loop
     for epoch in trange(200, desc="Training..."):
@@ -402,7 +420,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", "-o", type=str, default="/home/ebam/kacher1/molearn/DATA")
     parser.add_argument("--experiment-name", "-e", type=str, default="all_kv1.2")
     parser.add_argument("--wandb", "-v", action="store_true", default=False)
-    parser.add_argument("--qcharge-file", "-q", type=str, default=False)
+    parser.add_argument("--qcharge-file", "-q", type=str, default="")
     parser.add_argument("--traj", "-t", type=str, default=False)
 
     args = parser.parse_args()
