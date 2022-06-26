@@ -4,6 +4,7 @@ import pdb
 
 import wandb
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -298,17 +299,19 @@ def main(args):
     method = 'roll'
     atoms = ["CA", "C", "N", "CB", "O"]
 
+    dataset = FramesDataset(
+        args.dataset,
+        atoms=atoms,        
+    )
+
     if os.path.exists(f'{root}/mean_std.npy'):
         meanval, stdval = np.load(f'{root}/mean_std.npy')
     else:
         meanval, stdval = calculate_mean_std(dataset)
         np.save(f'{root}/mean_std.npy', (meanval, stdval))
 
-    dataset = FramesDataset(
-        args.dataset,
-        atoms=atoms,
-        
-    )
+    dataset.meanval = meanval
+    dataset.stdval = stdval
 
     lf = Auto_potential(
         frame=dataset[0]*dataset.stdval, 
