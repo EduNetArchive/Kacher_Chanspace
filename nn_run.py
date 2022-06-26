@@ -1,7 +1,4 @@
 import os
-from copy import deepcopy
-import pdb
-
 import wandb
 import numpy as np
 import pandas as pd
@@ -14,9 +11,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm, trange
 from argparse import ArgumentParser
 
-import biobox
 from molearn import Auto_potential, Autoencoder, load_data
-import nglview 
 
 import MDAnalysis as mda
 from MDAnalysis.analysis import align, rms
@@ -26,10 +21,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from PIL import Image
-
-from sklearn.cluster import DBSCAN, OPTICS
-from sklearn import metrics
-from sklearn.preprocessing import StandardScaler
 
 from utils.dataset import FramesDataset, calculate_mean_std
 
