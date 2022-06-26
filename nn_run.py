@@ -230,7 +230,7 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
         #interpolate between the encoded Z space for each network between test0 and test1
         for idx, t in enumerate(np.linspace(0, 1, 20)):
             point = float(t)*test0_z + (1-float(t))*test1_z
-            interpolated_points[idx] = point.squeeze().cpu().numpy()
+            interpolated_points[idx] = point.squeeze().cpu()
             interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
         interpolation_out *= dataset.stdval.reshape(3, 1).to(device)
         
