@@ -401,7 +401,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", "-o", type=str, default="/home/ebam/kacher1/molearn/DATA")
     parser.add_argument("--experiment-name", "-e", type=str, default="all_kv1.2")
     parser.add_argument("--wandb", "-v", action="store_true", default=False)
-    parser.add_argument("--qcharge_file", "-q", type=str, default=False)
+    parser.add_argument("--qcharge-file", "-q", type=str, default=False)
     parser.add_argument("--traj", "-t", type=str, default=False)
 
     args = parser.parse_args()
