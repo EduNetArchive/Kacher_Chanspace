@@ -305,10 +305,10 @@ def main(args):
     )
 
     if os.path.exists(f'{root}/mean_std.npy'):
-        meanval, stdval = np.load(f'{root}/mean_std.npy')
+        meanval, stdval = np.load(f'{root}/mean_std.npy', allow_pickle=True)
     else:
         meanval, stdval = calculate_mean_std(dataset)
-        np.save(f'{root}/mean_std.npy', (meanval, stdval))
+        np.save(f'{root}/mean_std.npy', (meanval, stdval), allow_pickle=True)
 
     dataset.meanval = meanval
     dataset.stdval = stdval
@@ -329,6 +329,8 @@ def main(args):
     df = pd.read_csv(args.qcharge_file, index_col = None)
     q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
     test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
+
+    # test0, test1 = dataset[33962], dataset[-10084] #qcharge
 
     test0 = test0.to(device)
     test1 = test1.to(device)
