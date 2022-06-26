@@ -177,7 +177,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
         mse_loss_1 = ((x1-out1)**2).mean() # reconstructive loss (Mean square error)
         out0 *= dataset.stdval.reshape(3, 1).to(device)
         out1 *= dataset.stdval.reshape(3, 1).to(device)
-        out_interpolated *= dataset.stdval.reshape(3, 1)
+        out_interpolated *= dataset.stdval.reshape(3, 1).to(device)
         
         mse_loss = (mse_loss_0 + mse_loss_1) / 2
 
