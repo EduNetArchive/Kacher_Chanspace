@@ -357,23 +357,6 @@ def main(args):
 
     optimizer = torch.optim.Adam(network.parameters(), lr=cfg["learning_rate"], amsgrad=True)
 
-    validation(
-        epoch=epoch,
-        network=network,
-        test0=test0,
-        test1=test1,
-        dataset=dataset,
-        num_atoms=num_atoms,
-        dataloader=val_loader,
-        loss_function=lf,
-        device=device,
-        img_size=100,
-        pdbs_dir=pdbs_dir,
-        checkpoints_dir=checkpoints_dir,
-        verbose=args.wandb,
-    )
-    exit(0)
-
     #training loop
     for epoch in trange(200, desc="Training..."):
         network_loss = train_epoch(
