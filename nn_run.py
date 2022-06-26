@@ -215,7 +215,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
 
 
 def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader, 
-               loss_function, device, mol, pdbs_dir, verbose=False, img_size=100):
+               loss_function, device, checkpoints_dir, pdbs_dir, verbose=False, img_size=100):
     #encode test with each network
     #Not training so switch to eval mode
     network.eval()
@@ -384,6 +384,7 @@ def main(args):
                 device=device,
                 img_size=100,
                 pdbs_dir=pdbs_dir,
+                checkpoints_dir=checkpoints_dir,
                 verbose=args.wandb,
             )
 
