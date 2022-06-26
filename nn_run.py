@@ -84,7 +84,7 @@ def visualize_energy(network, dataset, num_atoms, lf, size=100, bounding_box=(0,
         z_batch = z[i:(i+1)]
         z_batch=torch.tensor(z_batch).float().to(device)
         out = network.decode(z_batch)[:, :, :num_atoms]
-        out *= dataset.stdval
+        out *= dataset.stdval.reshape(3, 1)
         bond_energy, angle_energy, torsion_energy, NB_energy = lf.get_loss(out)
 
         loss_f = (bond_energy + angle_energy + torsion_energy + NB_energy)
@@ -184,9 +184,9 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
         #calculate MSE
         mse_loss_0 = ((x0-out0)**2).mean() # reconstructive loss (Mean square error)
         mse_loss_1 = ((x1-out1)**2).mean() # reconstructive loss (Mean square error)
-        out0 *= dataset.stdval
-        out1 *= dataset.stdval
-        out_interpolated *= dataset.stdval
+        out0 *= dataset.stdval.reshape(3, 1)
+        out1 *= dataset.stdval.reshape(3, 1)
+        out_interpolated *= dataset.stdval.reshape(3, 1)
         
         mse_loss = (mse_loss_0 + mse_loss_1) / 2
 
@@ -241,7 +241,7 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
             point = float(t)*test0_z + (1-float(t))*test1_z
             interpolated_points[idx] = point.squeeze().cpu().numpy()
             interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
-        interpolation_out *= dataset.stdval
+        interpolation_out *= dataset.stdval.reshape(3, 1)
         
     img, log_img, points = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
     wandb.log({"img": wandb.Image(img, caption=f"epoch_{epoch:0>4}")})
