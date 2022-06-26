@@ -399,6 +399,11 @@ if __name__ == "__main__":
     parser.add_argument("--wandb", "-v", action="store_true", default=False)
     parser.add_argument("--qcharge-file", "-q", type=str, default=False)
     parser.add_argument("--traj", "-t", type=str, default=False)
+    parser.add_argument("--notebook", action="store_true", default=False)
 
     args = parser.parse_args()
+
+    if args.notebook:
+        from tqdm.notebook import tqdm, trange
+
     main(args)
