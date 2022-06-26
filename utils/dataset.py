@@ -45,8 +45,9 @@ class FramesDataset(Dataset):
         frame = mol.coordinates[0]
 
         frame = torch.tensor(frame).float()
-        frame = frame.T
         frame = (frame - self.meanval) / self.stdval
+        
+        frame = frame.T
 
         return frame
 
