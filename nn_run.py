@@ -321,11 +321,11 @@ def main(args):
     # test0_idx, test1_idx = check_rmsd(args.traj)
     # test0, test1 = dataset[test0_idx], dataset[test1_idx]
     
-    # df = pd.read_csv(args.qcharge_file, index_col = None)
-    # q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
-    # test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
+    df = pd.read_csv(args.qcharge_file, index_col = None)
+    q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
+    test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
 
-    test0, test1 = dataset[33962], dataset[-10084] #qcharge
+    # test0, test1 = dataset[33962], dataset[-10084] #qcharge
 
     test0 = test0.to(device)
     test1 = test1.to(device)
