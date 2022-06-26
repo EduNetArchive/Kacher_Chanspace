@@ -51,7 +51,7 @@ def charge_dif(df):
     return maximal_idx, maximal_val, \
            minimal_idx, minimal_val 
 
-def alternative_rmsd2(traj): 
+def check_rmsd(traj): 
     R = rms.RMSD(traj,  # universe to align
                  traj,  # reference universe or atomgroup
                  select='backbone',  # group to superimpose and calculate RMSD
@@ -323,13 +323,11 @@ def main(args):
 
     num_atoms = dataset[0].shape[1]
 
-    #with respect to rmsd: test0, test1 = dataset[20222], dataset[84990]
-
     #with respect to rmsd: 
-    # test0_idx, test1_idx = alternative_rmsd2(traj)
+    # test0_idx, test1_idx = check_rmsd(args.traj)
     # test0, test1 = dataset[test0_idx], dataset[test1_idx]
     
-    df = pd.read_csv(args.qcharge_file,index_col = None)
+    df = pd.read_csv(args.qcharge_file, index_col = None)
     q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
     test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
 
@@ -407,6 +405,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", "-o", type=str, default="/home/ebam/kacher1/molearn/DATA")
     parser.add_argument("--experiment-name", "-e", type=str, default="all_kv1.2")
     parser.add_argument("--wandb", "-v", action="store_true", default=False)
+    parser.add_argument("--qcharge_file", "-q", type=str, default=False)
+    parser.add_argument("traj", "-t", type=str, default=False)
 
     args = parser.parse_args()
     main(args)
