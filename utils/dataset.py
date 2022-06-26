@@ -43,10 +43,10 @@ class FramesDataset(Dataset):
         mol = mol.get_subset(self.atom_idxs)
 
         frame = mol.coordinates[0]
-        frame = (frame - self.meanval) / self.stdval
 
         frame = torch.tensor(frame).float()
         frame = frame.T
+        frame = (frame - self.meanval) / self.stdval
 
         return frame
 
