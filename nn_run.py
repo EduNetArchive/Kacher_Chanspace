@@ -314,7 +314,7 @@ def main(args):
     dataset.stdval = stdval
 
     lf = Auto_potential(
-        frame=dataset[0]*dataset.stdval, 
+        frame=dataset[0]*dataset.stdval.reshape(3, 1),
         pdb_atom_names=dataset.atom_names, 
         method=method, 
         device=device
