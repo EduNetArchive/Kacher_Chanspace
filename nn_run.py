@@ -215,7 +215,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
 
 
 def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader, 
-               loss_function, device, mol, pdbs_dir, img_size=100):
+               loss_function, device, mol, pdbs_dir, verbose=False, img_size=100):
     #encode test with each network
     #Not training so switch to eval mode
     network.eval()
@@ -235,8 +235,11 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
         interpolation_out *= dataset.stdval.reshape(3, 1).to(device)
         
     img, log_img, points = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
-    wandb.log({"img": wandb.Image(img, caption=f"epoch_{epoch:0>4}")})
-    wandb.log({"log_img": wandb.Image(log_img, caption=f"epoch_{epoch:0>4}")})
+
+    if verbose:
+        wandb.log({"img": wandb.Image(img, caption=f"epoch_{epoch:0>4}")})
+        wandb.log({"log_img": wandb.Image(log_img, caption=f"epoch_{epoch:0>4}")})
+    
     np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.pdb', points)
 
     #save interpolations
@@ -368,7 +371,7 @@ def main(args):
         )
 
         #save interpolations between test0 and test1 every 5 epochs
-        if args.verbose and (epoch + 1) % 5 == 0:
+        if (epoch + 1) % 5 == 0:
             validation(
                 epoch=epoch,
                 network=network,
@@ -381,6 +384,7 @@ def main(args):
                 device=device,
                 img_size=100,
                 pdbs_dir=pdbs_dir,
+                verbose=args.wandb,
             )
 
         torch.save(network.state_dict(), f'{checkpoints_dir}/epoch_{epoch:0>4}_{network_loss.item():.5}.pth')
@@ -399,11 +403,6 @@ if __name__ == "__main__":
     parser.add_argument("--wandb", "-v", action="store_true", default=False)
     parser.add_argument("--qcharge-file", "-q", type=str, default=False)
     parser.add_argument("--traj", "-t", type=str, default=False)
-    parser.add_argument("--notebook", action="store_true", default=False)
 
     args = parser.parse_args()
-
-    if args.notebook:
-        from tqdm.notebook import tqdm, trange
-
     main(args)
