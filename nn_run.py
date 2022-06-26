@@ -156,9 +156,9 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
         plt.savefig("/tmp/fig2.png")
         plt.close()
         img2 = Image.open("/tmp/fig2.png")
-        return img, img2
+        return img, img2, img_conf
     
-    return img
+    return img, img_conf 
 
 
 def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
@@ -247,9 +247,10 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
             interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
         interpolation_out *= dataset.stdval
         
-    img, log_img = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
+    img, log_img, points = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
     wandb.log({"img": wandb.Image(img, caption=f"epoch_{epoch:0>4}")})
     wandb.log({"log_img": wandb.Image(log_img, caption=f"epoch_{epoch:0>4}")})
+    np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.pdb', points)
 
     #save interpolations
     mol = dataset.mol
