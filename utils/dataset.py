@@ -7,9 +7,19 @@ import tqdm
 import os
 
 class FramesDataset(Dataset):
-    def __init__(self, frames_path, atoms="*", ignore_atoms=[], meanval=0, stdval=1):
+    def __init__(self, frames_path, filter=None, atoms="*", ignore_atoms=[], meanval=0, stdval=1):
         self.frames_path = frames_path
+        self.filter = filter
+
         self.frames = glob.glob(f"{frames_path}/*.pdb")
+
+        if self.filter is not None:
+            self.frames = [
+                frame
+                for frame in self.frames
+                if self.filter(frame)
+            ]
+
         self.meanval = meanval
         self.stdval = stdval
 

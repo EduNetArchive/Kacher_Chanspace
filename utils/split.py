@@ -2,16 +2,20 @@ from tqdm import tqdm
 import os
 from argparse import ArgumentParser
 
-def split(filename, root):
+def split(filename, root, splitting_phrase):
     frame_num = 0
     dst_file = None
+    if args.option:
+        splitting_phrase=args.option
+    else:
+        splitting_phrase='ENDMDL'
 
     with open(filename) as src_file:
         for line in tqdm(src_file):
             if not line:
                 break
 
-            if line.startswith("ENDMDL"):
+            if line.startswith(splitting_phrase):
                 frame_num += 1
                 dst_file.write(line)
                 dst_file.close()
@@ -28,6 +32,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--filename", "-i", type=str, required=True)
     parser.add_argument("--root", "-o", type=str, required=True)
+    parser.add_argument("--option", "-e", type=str,required=False)
 
     args = parser.parse_args()
-    split(args.filename, args.root)
+    split(args.filename, args.root, args.option)

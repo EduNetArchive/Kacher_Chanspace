@@ -1,4 +1,5 @@
 import os
+from select import epoll
 import wandb
 import numpy as np
 import pandas as pd
@@ -38,9 +39,10 @@ def charge_dif(df):
     return maximal_idx, maximal_val, \
            minimal_idx, minimal_val 
 
-def check_rmsd(traj): 
-    R = rms.RMSD(traj,  # universe to align
-                 traj,  # reference universe or atomgroup
+def check_rmsd(traj):
+    t = mda.Universe(traj, in_memory=True, in_memory_step=7) # !!!!!! change it in memory step = how many to skip
+    R = rms.RMSD(t,  # universe to align
+                 t,  # reference universe or atomgroup
                  select='backbone',  # group to superimpose and calculate RMSD
                  ref_frame=0)  # frame index of the reference
     R.run()
@@ -49,8 +51,8 @@ def check_rmsd(traj):
     
     test1_idx = int(np.argmax(df[2]))
     
-    R2 = rms.RMSD(traj,  # universe to align
-                 traj,  # reference universe or atomgroup
+    R2 = rms.RMSD(t,  # universe to align
+                 t,  # reference universe or atomgroup
                  select='backbone',  # group to superimpose and calculate RMSD
                  ref_frame=test1_idx)  # frame index of the reference
     R2.run()
@@ -114,6 +116,8 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
         x2 = x_av+a/2
         y1 = y_av-a/2
         y2 = y_av+a/2
+
+        bb = (x1, x2, y1, y2)
     
     else:
         x1, y1, x2, y2 = bounding_box
@@ -131,7 +135,6 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
     plt.savefig("/tmp/fig1.png")
     plt.close()
     img = Image.open("/tmp/fig1.png")
-    
             
     if log_scale:
         plt.scatter(img_conf[:, 0], img_conf[:,1], c=np.arange(len(img_conf)), alpha=0.5, s=1, cmap='PiYG')
@@ -144,11 +147,12 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
         plt.savefig("/tmp/fig2.png")
         plt.close()
         img2 = Image.open("/tmp/fig2.png")
-        return img, img2, img_conf
+        return img, img2, img_conf, img_array, bb
     
-    return img, img_conf 
+    return img, img_conf, img_array, bb 
 
 
+# @profile
 def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
     network.train()
     
@@ -191,7 +195,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
         #item  ~ torch.no_grad
         
         with torch.no_grad():
-            scale = 0.1*mse_loss.item()/(bond_energy.item()+angle_energy.item()+torsion_energy.item()+NB_energy.item())
+            scale = args.scale*mse_loss.item()/(bond_energy.item()+angle_energy.item()+torsion_energy.item()+NB_energy.item())
 
         network_loss = mse_loss + scale*(bond_energy + angle_energy + torsion_energy + NB_energy)
         
@@ -211,10 +215,12 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
 
         #advance the network weights
         optimiser.step()
+
+        break
         
     return network_loss
 
-
+# @profile
 def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader, 
                loss_function, device, checkpoints_dir, pdbs_dir, verbose=False, img_size=100):
     #encode test with each network
@@ -235,19 +241,23 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
             interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
         interpolation_out *= dataset.stdval
         
-    img, log_img, points = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
-
+    img, log_img, points, energy_array, bb = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
+    np.save(f'{checkpoints_dir}/energy_{epoch}.npy', energy_array)
+    np.save(f'{checkpoints_dir}/bb_x1x2y1y2_{epoch}.npy', bb)
+    
     if verbose:
         wandb.log({"img": wandb.Image(img, caption=f"epoch_{epoch:0>4}")})
         wandb.log({"log_img": wandb.Image(log_img, caption=f"epoch_{epoch:0>4}")})
     
-    np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.pdb', points)
+    np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.npy', points)
+    
+
 
     #save interpolations
     mol = dataset.mol
     mol.coordinates = interpolation_out.numpy()
     mol.write_pdb(f'{pdbs_dir}/epoch_{epoch:0>4}_interpolation.pdb')
-    np.save(f'{checkpoints_dir}/points_epoch_{epoch:0>4}.pdb', interpolated_points)
+    np.save(f'{checkpoints_dir}/points_epoch_{epoch:0>4}.npy', interpolated_points)
 
 def create_dirs(args):
     root = os.path.join(args.output, args.experiment_name)
@@ -256,13 +266,13 @@ def create_dirs(args):
         os.mkdir(root)
 
     checkpoints_dir = os.path.join(root, 'checkpoints')
-    # checkpoints_extra_dir = os.path.join(ROOT, 'checkpoints_extra')
+    checkpoints_extra_dir = os.path.join(root, 'checkpoints_extra')
     # conformations_dir = os.path.join(ROOT, 'conformations')
     pdbs_dir = os.path.join(root, 'pdbs')
     # weights_dir = os.path.join(ROOT, 'weights')
 
-    # if not os.path.exists(checkpoints_extra_dir):
-    #     os.mkdir(checkpoints_extra_dir)
+    if not os.path.exists(checkpoints_extra_dir):
+        os.mkdir(checkpoints_extra_dir)
 
     if not os.path.exists(checkpoints_dir):
         os.mkdir(checkpoints_dir)
@@ -276,10 +286,12 @@ def create_dirs(args):
     # if not os.path.exists(weights_dir):
     #     os.mkdir(weights_dir)
 
-    return root, checkpoints_dir, pdbs_dir
+    return root, checkpoints_dir, checkpoints_extra_dir, pdbs_dir
 
 def main(args):
-    root, checkpoints_dir, pdbs_dir = create_dirs(args)
+    root, checkpoints_dir, checkpoints_extra_dir, pdbs_dir = create_dirs(args)
+    if args.extra:
+        checkpoints_dir=checkpoints_extra_dir
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -289,20 +301,22 @@ def main(args):
     #atom_names = torch.load(f'{conformations_dir}/atom_names.pt')
 
     # atom_names = torch.load(f'{DATA}/all_walkers_each200/conformations/atom_names.pt')
-    batch_size = 32 # if this is too small, gpu utilization goes down
+    batch_size = 128 # if this is too small, gpu utilization goes down
     epoch = 0
     method = 'roll'
     atoms = ["CA", "C", "N", "CB", "O"]
 
+    #def filter(frame):
+    #    frame_num = int(frame.split('/')[-1][:-4])
+    #    return frame_num
+#
     dataset = FramesDataset(
         args.dataset,
-        atoms=atoms,        
+        atoms=atoms,
+        #filter=filter,
     )
 
     if os.path.exists(f'{root}/mean_std.npy'):
-        meanval, stdval = np.load(f'{root}/mean_std.npy', allow_pickle=True)
-    else:
-        meanval, stdval = calculate_mean_std(dataset)
         np.save(f'{root}/mean_std.npy', (meanval, stdval), allow_pickle=True)
 
     dataset.meanval = meanval
@@ -318,14 +332,18 @@ def main(args):
     num_atoms = dataset[0].shape[1]
 
     #with respect to rmsd: 
-    # test0_idx, test1_idx = check_rmsd(args.traj)
-    # test0, test1 = dataset[test0_idx], dataset[test1_idx]
+    if args.traj:
+        test0_idx, test1_idx = check_rmsd(args.traj)
+        test0, test1 = dataset[test0_idx], dataset[test1_idx]
     
-    df = pd.read_csv(args.qcharge_file, index_col = None)
-    q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
-    test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
+    #with respect to qcharge
+    if args.qcharge_file:
+        df = pd.read_csv(args.qcharge_file)
+        q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
+        test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
+        print(q_max_idx, q_max_val, q_min_idx, q_min_val)
 
-    # test0, test1 = dataset[33962], dataset[-10084] #qcharge
+    #test0, test1 = dataset[33962], dataset[-10084] #qcharge
 
     test0 = test0.to(device)
     test1 = test1.to(device)
@@ -336,23 +354,22 @@ def main(args):
         num_epochs=200,
     )
 
-    num_workers = os.cpu_count()
+    num_workers = os.cpu_count()//2
 
     train_loader = torch.utils.data.DataLoader(dataset,
                 batch_size=2 * cfg["batch_size"], shuffle=True, drop_last=True, num_workers=num_workers)
 
     val_loader = torch.utils.data.DataLoader(dataset,
-                batch_size=2 * cfg["batch_size"], shuffle=False, drop_last=False, num_workers=num_workers)
+                batch_size=2 * cfg["batch_size"], shuffle=False, drop_last=False, num_workers=0)#num_workers)
 
 
-    network = Autoencoder(m=2.0, latent_z=2, r=2, sigmoid=False, BN=True).to(device)
-    # network = torch.DataParallel(network)
-    # network.encode = network.module.encode
-    # network.decode = network.module.decode
+    network = Autoencoder(m=2.0, latent_z=2, r=2, sigmoid=False, BN=True, parallel_mode=args.parallel).to(device)
+    if args.extra:
+        network.load_state_dict(torch.load(args.extra),strict=False)
 
     #Sending to W&B
     if args.wandb:
-        wandb.init(project="molearn", entity="jk")
+        wandb.init(project="molearn", entity="jk", name=args.experiment_name)
         wandb.config = cfg
 
     optimizer = torch.optim.Adam(network.parameters(), lr=cfg["learning_rate"], amsgrad=True)
@@ -370,6 +387,7 @@ def main(args):
             device=device,
             verbose=args.wandb,
         )
+        # exit(0)
 
         #save interpolations between test0 and test1 every 5 epochs
         if (epoch + 1) % 5 == 0:
@@ -388,6 +406,8 @@ def main(args):
                 checkpoints_dir=checkpoints_dir,
                 verbose=args.wandb,
             )
+        
+        
 
         torch.save(network.state_dict(), f'{checkpoints_dir}/epoch_{epoch:0>4}_{network_loss.item():.5}.pth')
         
@@ -401,10 +421,13 @@ if __name__ == "__main__":
 
     parser.add_argument("--dataset", "-i", type=str, default="/home/ebam/kacher1/doc/sum_traj/split")
     parser.add_argument("--output", "-o", type=str, default="/home/ebam/kacher1/molearn/DATA")
-    parser.add_argument("--experiment-name", "-e", type=str, default="all_kv1.2")
+    parser.add_argument("--experiment-name", "-e", type=str, default="all_kv1.2_pretrained")
     parser.add_argument("--wandb", "-v", action="store_true", default=False)
     parser.add_argument("--qcharge-file", "-q", type=str, default="")
-    parser.add_argument("--traj", "-t", type=str, default=False)
+    parser.add_argument("--traj", "-t", type=str, default="")
+    parser.add_argument("--extra", "-d", type=str, default="")
+    parser.add_argument("--parallel", "-p", action="store_true", default=False)
+    parser.add_argument("--scale", "-s", type=float, default=0.1)
 
     args = parser.parse_args()
     main(args)

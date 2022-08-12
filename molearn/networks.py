@@ -55,7 +55,7 @@ class From2D(nn.Module):
         return x
 
 class Autoencoder(nn.Module):
-    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False):
+    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False, parallel_mode=False):
         '''
         Simple 1D convolutional Autoencoder with residueal blocks
 
@@ -68,6 +68,37 @@ class Autoencoder(nn.Module):
         :param droprate: droprate
         '''
         super(Autoencoder, self).__init__()
+        self.encoder = Encoder(init_z, latent_z, depth, m, r, droprate, sigmoid, BN)
+        self.decoder = Decoder(init_z, latent_z, depth, m, r, droprate, sigmoid, BN)
+        if parallel_mode:
+            self.encoder = nn.DataParallel(self.encoder)
+            self.decoder = nn.DataParallel(self.decoder)
+
+    def encode(self, x):
+        '''
+            Encode the data to the latent space
+
+            :param x: input data shape [B, 3, N] where B is batch_size, and N is the number of atoms, and the dimensionality of the data should be 3 (cartesian)
+            :returns: output data shape [B, Z, 1]
+        '''
+        return self.encoder(x)
+
+    def decode(self, x):
+        '''
+            Decode the latent coordinates
+
+            :param x: input latent coordinates shape [B, 2, 1]
+            :return: output size is [B, 3, init_z*m**depth]
+        '''
+        return self.decoder(x)
+
+    def forward(self, x):
+        return self.decode(self.encode(x))
+    
+#These changes were necessary for parallelism in order to deal with large datasets i.e.
+class Encoder(nn.Module):
+    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False):
+        super(Encoder, self).__init__()
         # encoder block
         eb = nn.ModuleList()
         eb.append(nn.Conv1d(3, init_z, 4, 2, 1, bias=False))
@@ -86,7 +117,15 @@ class Autoencoder(nn.Module):
         eb.append(nn.Conv1d(int(init_z*m**depth), latent_z, 4, 2, 1, bias=False))
         eb.append(To2D(sigmoid=sigmoid, BN=BN))
         self.encoder = eb
-        # decoder block
+        
+    def forward(self, x):
+        for m in self.encoder:
+            x = m(x)
+        return x
+class Decoder(nn.Module):
+    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False):
+        super(Decoder, self).__init__()
+    # decoder block
         db = nn.ModuleList()
         db.append(From2D())
         db.append(nn.ConvTranspose1d(latent_z, int(init_z*m**(depth+1)), 4, 2, 1, bias=False))
@@ -104,28 +143,7 @@ class Autoencoder(nn.Module):
                 db.append(ResidualBlock(int(init_z*m**i)))
         db.append(nn.ConvTranspose1d(int(init_z*m**(i)), 3, 4, 2, 1))
         self.decoder = db 
-    def encode(self, x):
-        '''
-            Encode the data to the latent space
-
-            :param x: input data shape [B, 3, N] where B is batch_size, and N is the number of atoms, and the dimensionality of the data should be 3 (cartesian)
-            :returns: output data shape [B, Z, 1]
-        '''
-        for m in self.encoder:
-            x = m(x)
-        return x
-    def decode(self, x):
-        '''
-            Decode the latent coordinates
-
-            :param x: input latent coordinates shape [B, 2, 1]
-            :return: output size is [B, 3, init_z*m**depth]
-        '''
+    def forward(self, x):
         for m in self.decoder:
             x = m(x)
         return x
-
-    def forward(self, x):
-        return self.decode(self.encode(x))
-    
-#These changes were necessary for parallelism in order to deal with large datasets i.e.
