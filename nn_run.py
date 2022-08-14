@@ -317,7 +317,11 @@ def main(args):
     )
 
     if os.path.exists(f'{root}/mean_std.npy'):
+        meanval, stdval = np.load(f'{root}/mean_std.npy', (meanval, stdval), allow_pickle=True)
+    else:
+        meanval, stdval = calculate_mean_std(dataset)
         np.save(f'{root}/mean_std.npy', (meanval, stdval), allow_pickle=True)
+        
 
     dataset.meanval = meanval
     dataset.stdval = stdval
