@@ -301,23 +301,23 @@ def main(args):
     #atom_names = torch.load(f'{conformations_dir}/atom_names.pt')
 
     # atom_names = torch.load(f'{DATA}/all_walkers_each200/conformations/atom_names.pt')
-    batch_size = 128 # if this is too small, gpu utilization goes down
+    batch_size = args.batchsize # if this is too small, gpu utilization goes down
     epoch = 0
     method = 'roll'
     atoms = ["CA", "C", "N", "CB", "O"]
 
-    #def filter(frame):
-    #    frame_num = int(frame.split('/')[-1][:-4])
-    #    return frame_num
+    def filter(frame):
+        frame_num = int(frame.split('/')[-1][:-4])
+        return frame_num < 69174 or frame_num >= (182178-23520) #any filter
 #
     dataset = FramesDataset(
         args.dataset,
         atoms=atoms,
-        #filter=filter,
+        filter=filter if args.filter else None,
     )
 
     if os.path.exists(f'{root}/mean_std.npy'):
-        meanval, stdval = np.load(f'{root}/mean_std.npy', (meanval, stdval), allow_pickle=True)
+        meanval, stdval = np.load(f'{root}/mean_std.npy', allow_pickle=True)
     else:
         meanval, stdval = calculate_mean_std(dataset)
         np.save(f'{root}/mean_std.npy', (meanval, stdval), allow_pickle=True)
@@ -423,7 +423,7 @@ def main(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
 
-    parser.add_argument("--dataset", "-i", type=str, default="/home/ebam/kacher1/doc/sum_traj/split")
+    parser.add_argument("--dataset", "-i", type=str, default="/home/ebam/kacher1/doc/sum_traj/kv1frames")
     parser.add_argument("--output", "-o", type=str, default="/home/ebam/kacher1/molearn/DATA")
     parser.add_argument("--experiment-name", "-e", type=str, default="all_kv1.2_pretrained")
     parser.add_argument("--wandb", "-v", action="store_true", default=False)
@@ -432,6 +432,8 @@ if __name__ == "__main__":
     parser.add_argument("--extra", "-d", type=str, default="")
     parser.add_argument("--parallel", "-p", action="store_true", default=False)
     parser.add_argument("--scale", "-s", type=float, default=0.1)
+    parser.add_argument("--batchsize", "-b", type=int, default=128)
+    parser.add_argument("--filter", "-r", action="store_true", default=False)
 
     args = parser.parse_args()
     main(args)
