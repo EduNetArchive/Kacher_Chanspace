@@ -1,5 +1,5 @@
 # chanspace
-This repo is a fork from [molearn](https://github.com/Degiacomi-Lab/molearn).
+This repo was started as a fork from [molearn](https://github.com/Degiacomi-Lab/molearn), however, it deals with a very specific subject - ion channels - and as well gains many useful utils for visualization and data handling.
 
 Ion channels are still a 'hard nut to crack' for scientists all over the globe. In the era of the incredible growth of machine learning applications in all spheres of life, its potential is starting to ease the limitations of this enormous research area as well. The intriguing puzzle not solved yet is the channels' conformational space and transitions. In a nutshell, chanspace aims to explore the conformational space of ion channels with the help of ML. Moreover, there are multiple useful utils that might be used independently for other applications.
 
