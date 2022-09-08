@@ -155,7 +155,9 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
 # @profile
 def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
     network.train()
-    
+    smoothed_loss = None
+    alpha = 0.9 
+
     batch_size = train_loader.batch_size // 2
 
     for batch in tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
@@ -198,7 +200,12 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
             scale = args.scale*mse_loss.item()/(bond_energy.item()+angle_energy.item()+torsion_energy.item()+NB_energy.item())
 
         network_loss = mse_loss + scale*(bond_energy + angle_energy + torsion_energy + NB_energy)
-        
+        if smoothed_loss is None: 
+            smoothed_loss = network_loss.item()
+        else: 
+            smoothed_loss = (1-alpha)*network_loss.item() + alpha*smoothed_loss
+
+
         if verbose:
             wandb.log(dict(
                 mse_loss=mse_loss.item(),
@@ -218,7 +225,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
 
         break
         
-    return network_loss
+    return smoothed_loss, network_loss
 
 # @profile
 def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader, 
@@ -242,22 +249,22 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
         interpolation_out *= dataset.stdval
         
     img, log_img, points, energy_array, bb = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
-    np.save(f'{checkpoints_dir}/energy_{epoch}.npy', energy_array)
-    np.save(f'{checkpoints_dir}/bb_x1x2y1y2_{epoch}.npy', bb)
+    #np.save(f'{checkpoints_dir}/energy_{epoch}.npy', energy_array)
+    #np.save(f'{checkpoints_dir}/bb_x1x2y1y2_{epoch}.npy', bb)
     
     if verbose:
         wandb.log({"img": wandb.Image(img, caption=f"epoch_{epoch:0>4}")})
         wandb.log({"log_img": wandb.Image(log_img, caption=f"epoch_{epoch:0>4}")})
     
-    np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.npy', points)
+    #np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.npy', points)
     
-
-
     #save interpolations
     mol = dataset.mol
     mol.coordinates = interpolation_out.numpy()
     mol.write_pdb(f'{pdbs_dir}/epoch_{epoch:0>4}_interpolation.pdb')
-    np.save(f'{checkpoints_dir}/points_epoch_{epoch:0>4}.npy', interpolated_points)
+    #np.save(f'{checkpoints_dir}/points_epoch_{epoch:0>4}.npy', interpolated_points)
+
+    return points, interpolated_points, energy_array, bb
 
 def create_dirs(args):
     root = os.path.join(args.output, args.experiment_name)
@@ -308,7 +315,7 @@ def main(args):
 
     def filter(frame):
         frame_num = int(frame.split('/')[-1][:-4])
-        return frame_num < 69174 or frame_num >= (182178-23520) #any filter
+        return frame_num >=69174 #< 69174 or frame_num >= (182178-23520) #any filter
 #
     dataset = FramesDataset(
         args.dataset,
@@ -342,12 +349,19 @@ def main(args):
     
     #with respect to qcharge
     if args.qcharge_file:
-        df = pd.read_csv(args.qcharge_file)
-        q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
+        if args.qcharge_file[-3:] == 'npy':       
+            qfile = np.load(args.qcharge_file, allow_pickle=True)
+            q_max_val = np.max(qfile) 
+            q_max_idx = np.argmax(qfile)
+            q_min_val = np.min(qfile) 
+            q_min_idx = np.argmin(qfile)
+        else: 
+            df = pd.read_csv(args.qcharge_file)
+            q_max_idx, q_max_val, q_min_idx, q_min_val = charge_dif(df)
+        
         test0, test1 = dataset[q_min_idx], dataset[q_max_idx]
         print(q_max_idx, q_max_val, q_min_idx, q_min_val)
 
-    #test0, test1 = dataset[33962], dataset[-10084] #qcharge
 
     test0 = test0.to(device)
     test1 = test1.to(device)
@@ -378,9 +392,12 @@ def main(args):
 
     optimizer = torch.optim.Adam(network.parameters(), lr=cfg["learning_rate"], amsgrad=True)
 
+    best_loss = torch.inf
+    best_loss_name = None
+    
     #training loop
     for epoch in trange(200, desc="Training..."):
-        network_loss = train_epoch(
+        smoothed_loss, network_loss = train_epoch(
             epoch=epoch,
             network=network,
             train_loader=train_loader,
@@ -394,26 +411,41 @@ def main(args):
         # exit(0)
 
         #save interpolations between test0 and test1 every 5 epochs
-        if (epoch + 1) % 5 == 0:
-            validation(
-                epoch=epoch,
-                network=network,
-                test0=test0,
-                test1=test1,
-                dataset=dataset,
-                num_atoms=num_atoms,
-                dataloader=val_loader,
-                loss_function=lf,
-                device=device,
-                img_size=100,
-                pdbs_dir=pdbs_dir,
-                checkpoints_dir=checkpoints_dir,
-                verbose=args.wandb,
-            )
+        #if (epoch + 1) % 5 == 0:
+        (
+            points, 
+            interpolated_points, 
+            energy_array, 
+            bb
+        ) = validation(
+            epoch=epoch,
+            network=network,
+            test0=test0,
+            test1=test1,
+            dataset=dataset,
+            num_atoms=num_atoms,
+            dataloader=val_loader,
+            loss_function=lf,
+            device=device,
+            img_size=100,
+            pdbs_dir=pdbs_dir,
+            checkpoints_dir=checkpoints_dir,
+            verbose=args.wandb,
+        )
+    
         
-        
+        if smoothed_loss < best_loss: 
+            best_loss = smoothed_loss
+            if best_loss_name is not None: 
+                os.remove(best_loss_name)
+            best_loss_name = f'{checkpoints_dir}/epoch_{epoch:0>4}_{smoothed_loss:.5}.pth'
+            torch.save(network.state_dict(), best_loss_name)
+            np.save(f'{checkpoints_dir}/frames2D.npy', points)
+            np.save(f'{checkpoints_dir}/points.npy', interpolated_points)
+            np.save(f'{checkpoints_dir}/bb_x1x2y1y2.npy', bb)
+            np.save(f'{checkpoints_dir}/energy.npy', energy_array)
 
-        torch.save(network.state_dict(), f'{checkpoints_dir}/epoch_{epoch:0>4}_{network_loss.item():.5}.pth')
+        torch.save(network.state_dict(), f'{checkpoints_dir}/last_checkpoint.pth')
         
         #if extra training 
         #torch.save(network.state_dict(), f'{checkpoints_extra_dir}/epoch_{epoch:0>4}_{network_loss.item():.5}.pth')
@@ -423,7 +455,7 @@ def main(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
 
-    parser.add_argument("--dataset", "-i", type=str, default="/home/ebam/kacher1/doc/sum_traj/kv1frames")
+    parser.add_argument("--dataset", "-i", type=str, default="/home/ebam/kacher1/Files/Kv1.2.VSD/kv1frames")
     parser.add_argument("--output", "-o", type=str, default="/home/ebam/kacher1/molearn/DATA")
     parser.add_argument("--experiment-name", "-e", type=str, default="all_kv1.2_pretrained")
     parser.add_argument("--wandb", "-v", action="store_true", default=False)

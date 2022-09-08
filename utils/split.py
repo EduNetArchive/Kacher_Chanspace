@@ -12,20 +12,27 @@ def split(filename, root, splitting_phrase):
 
     with open(filename) as src_file:
         for line in tqdm(src_file):
+            if line.startswith("CONNECT"):
+                continue
+
             if not line:
                 break
 
-            if line.startswith(splitting_phrase):
+            if line.startswith(splitting_phrase) and dst_file is not None:
                 frame_num += 1
                 dst_file.write(line)
                 dst_file.close()
                 dst_file = None
+                # if flag:
+                #     os.remove(file_path)
+                # flag = True
             elif dst_file is None:
                 file_path = os.path.join(root, f"{frame_num:0>6}.pdb")
                 dst_file = open(file_path, "w")
 
             if dst_file is not None:
                 dst_file.write(line)
+                # flag = False
 
 if __name__ == "__main__":
     parser = ArgumentParser()
