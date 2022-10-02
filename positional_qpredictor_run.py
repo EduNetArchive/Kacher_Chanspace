@@ -11,7 +11,7 @@ import torch.optim
 import tensorflow as tf
 
 import utils.chanset as chanset
-from utils.qpredictor import QPredictor
+from utils.positional_qpredictor import PositionalQPredictor
 
 from tqdm import tqdm, trange
 from argparse import ArgumentParser
@@ -42,12 +42,13 @@ def create_dirs(args):
 
 def train_epoch(loss_function, train_loader, model, optimizer, device):
     for batch in train_loader:
-        xyz, _, qcharges = batch
+        xyz, atoms, qcharges = batch
         xyz = xyz.to(device, torch.float)
+        atoms = atoms.to(device, torch.long)
         qcharges = qcharges.to(device, torch.float)
 
         xyz = xyz.transpose(1,2)
-        output = model(xyz)
+        output = model(xyz, atoms)
         loss = loss_function(output, qcharges)
         optimizer.zero_grad()
         loss.backward()
@@ -62,12 +63,13 @@ def val_epoch(loss_function, val_loader, model, device):
         total_loss = 0
 
         for batch in val_loader:
-            xyz, _, qcharges = batch
+            xyz, atoms, qcharges = batch
             xyz = xyz.to(device, torch.float)
+            atoms = atoms.to(device, torch.long)
             qcharges = qcharges.to(device, torch.float)
 
             xyz = xyz.transpose(1,2)
-            output = model(xyz)
+            output = model(xyz, atoms)
             loss = loss_function(output, qcharges)
             total_loss += loss.item()
 
@@ -128,9 +130,12 @@ def main(args):
     lr = args.lr
 
 
-    model = QPredictor(depth=4, scale=2, channels=32, res_n=2, droprate=None, batch_norm=True).to(device)
+    num_unique_atoms = len(train_dataset.atomname_to_label)
+
+    model = PositionalQPredictor(num_unique_atoms=num_unique_atoms, embedding_dim=16, depth=4, scale=2, channels=32, res_n=2, droprate=None, batch_norm=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr)
     loss_function = nn.MSELoss()
+
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                     batch_size=batch_size, shuffle=True, drop_last=True, num_workers=num_workers)
