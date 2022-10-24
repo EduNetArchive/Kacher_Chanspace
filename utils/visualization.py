@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
-def interactive_visulization(points, labels, qcharges=None, rmsd=None, molecules=None, bg=None, bb=None):
+def interactive_visulization(points, labels, qcharges=None, rmsd=None, molecules=None, bg=None, bb=None, width=400, height=1000):
     """
     points: [num_frames, 2]
     molecules: [num_frames, 3, num_atoms]
@@ -100,9 +100,9 @@ def interactive_visulization(points, labels, qcharges=None, rmsd=None, molecules
         )   
     # fig.update_layout(template="plotly_white")
     fig.update_layout(
-        width = 400,
-        height = 1000,
-    )
+        width = width,
+        height = height,
+     )
     # Preparing interactive widget
     
     if molecules is not None:

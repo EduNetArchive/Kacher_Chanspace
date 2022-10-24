@@ -55,7 +55,7 @@ class From2D(nn.Module):
         return x
 
 class Autoencoder(nn.Module):
-    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False, parallel_mode=False):
+    def __init__(self, in_channels=3, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False, parallel_mode=False):
         '''
         Simple 1D convolutional Autoencoder with residueal blocks
 
@@ -68,7 +68,7 @@ class Autoencoder(nn.Module):
         :param droprate: droprate
         '''
         super(Autoencoder, self).__init__()
-        self.encoder = Encoder(init_z, latent_z, depth, m, r, droprate, sigmoid, BN)
+        self.encoder = Encoder(in_channels, init_z, latent_z, depth, m, r, droprate, sigmoid, BN)
         self.decoder = Decoder(init_z, latent_z, depth, m, r, droprate, sigmoid, BN)
         if parallel_mode:
             self.encoder = nn.DataParallel(self.encoder)
@@ -97,11 +97,11 @@ class Autoencoder(nn.Module):
     
 #These changes were necessary for parallelism in order to deal with large datasets i.e.
 class Encoder(nn.Module):
-    def __init__(self, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False):
+    def __init__(self, in_channels=3, init_z=32, latent_z=1, depth=4, m=1.5, r=0, droprate=None, sigmoid=True, BN=False):
         super(Encoder, self).__init__()
         # encoder block
         eb = nn.ModuleList()
-        eb.append(nn.Conv1d(3, init_z, 4, 2, 1, bias=False))
+        eb.append(nn.Conv1d(in_channels, init_z, 4, 2, 1, bias=False))
         eb.append(nn.BatchNorm1d(init_z))
         if droprate is not None:
             eb.append(nn.Dropout(p=droprate))

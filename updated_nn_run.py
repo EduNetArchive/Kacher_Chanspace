@@ -1,4 +1,4 @@
-mport os
+import os
 import pdb
 import wandb
 
@@ -57,8 +57,9 @@ def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding
 def conformations_to_latent(network, train_loader, device):
     z_list=[]
     with torch.no_grad():
-        for batch in tqdm(train_loader):
-            x = batch.to(device)
+        for batch in tqdm.tqdm(train_loader):
+            x, *_ = batch
+            x = x.to(device)
             z = network.encode(x)
             z_list.append(z.cpu().squeeze(2))
     
@@ -122,11 +123,11 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
 def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
     network.train()
     smoothed_loss = None
-    alpha = 0.9 
+    smoothing_coef = 0.9 
 
     batch_size = train_loader.batch_size // 2
 
-    for batch in tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
+    for batch in tqdm.tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
         x, *_ = [t.to(device) for t in batch]
 
         x0, x1 = x.split(batch_size)
@@ -169,7 +170,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
         if smoothed_loss is None: 
             smoothed_loss = network_loss.item()
         else: 
-            smoothed_loss = (1-alpha)*network_loss.item() + alpha*smoothed_loss
+            smoothed_loss = (1-smoothing_coef)*network_loss.item() + smoothing_coef*smoothed_loss
 
 
         if verbose:
@@ -202,8 +203,8 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
     interpolated_points = torch.zeros(20, 2)
     
     with torch.no_grad(): # don't need gradients for this bit
-        test0_z = network.encode(test0.float())
-        test1_z = network.encode(test1.float())
+        test0_z = network.encode(test0.unsqueeze(0).float())
+        test1_z = network.encode(test1.unsqueeze(0).float())
         #interpolate between the encoded Z space for each network between test0 and test1
         for idx, t in enumerate(np.linspace(0, 1, 20)):
             point = float(t)*test0_z + (1-float(t))*test1_z
@@ -324,8 +325,8 @@ def main(args):
         device=device
     )
 ###
-    test0 = dataset[test0].to(device)
-    test1 = dataset[test1].to(device)    
+    test0 = dataset[test0][0].to(device)
+    test1 = dataset[test1][0].to(device)    
 
 ###
     train_loader = torch.utils.data.DataLoader(dataset,
@@ -362,7 +363,7 @@ def main(args):
             num_atoms=num_atoms,
             dataset=dataset,
             device=device,
-            verbose=args.wandb,
+            verbose=args.verbose,
         )
         # exit(0)
 
@@ -387,7 +388,7 @@ def main(args):
             img_size=100,
             pdbs_dir=pdbs_dir,
             checkpoints_dir=checkpoints_dir,
-            verbose=args.wandb,
+            verbose=args.verbose,
         )
     
         

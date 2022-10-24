@@ -21,7 +21,11 @@ class Auto_potential():
     def __init__(self, frame, pdb_atom_names,
                 padded_residues=False,
                 method =('indexed', 'convolutional', 'roll')[2],
-                device=torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'), fix_h=False,alt_vdw=[], NB='repulsive',version=4):
+                device=torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'), 
+                fix_h=True,
+                alt_vdw=[],
+                NB='repulsive',
+                version=4):
 
         '''
         At instantiation will load amber parameters and create the necessary convolutions/indexs/rolls to calculate the energy of the molecule. Energy can be assessed with the
@@ -70,7 +74,7 @@ class Auto_potential():
         if self.method == 'indexed':
             return self._padded_residues_loss(x)
 
-    def _roll_init(self, frame, pdb_atom_names, NB='full', fix_h=False,alt_vdw=[], version=4):
+    def _roll_init(self, frame, pdb_atom_names, NB='full', fix_h=True,alt_vdw=[], version=4):
         (b_masks, b_equil, b_force, b_weights,
             a_masks, a_equil, a_force, a_weights,
             t_masks, t_para, t_weights,

@@ -59,13 +59,12 @@ class PositionalQPredictor(nn.Module):
     
 
     def forward(self, xyz, atom_names): 
-        atom_names = self.embeddings(atom_names)
-        atom_names = atom_names.swapaxes(1,2)
-        atom_names = self.positional_enconding(atom_names)
-        x = torch.cat([xyz, atom_names], dim=1)
+        atom_names = self.embeddings(atom_names) 
+        atom_names = atom_names.swapaxes(1,2) 
+        atom_names = self.positional_enconding(atom_names) # (B, D, N) 
+        x = torch.cat([xyz, atom_names], dim=1) 
         x = self.layers(x)
         return x
-
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):

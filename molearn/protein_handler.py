@@ -524,7 +524,7 @@ def get_convolutions(dataset, pdb_atom_names,
                               fix_terminal=True,
                               fix_charmm_residues=True,
                               fix_slice_method=False,
-                              fix_h=False,
+                              fix_h=True, #hmmmmmm
                               alt_vdw = [],
                               permitivity=1.0
                              ):
@@ -585,6 +585,9 @@ def get_convolutions(dataset, pdb_atom_names,
     improper_period, other_parameters) =  get_amber_parameters()
     if fix_terminal:
         pdb_atom_names[pdb_atom_names[:,0]=='OXT',0]='O'
+        pdb_atom_names[pdb_atom_names[:, 0]=='OT',0]='O' 
+        pdb_atom_names[pdb_atom_names[:, 0]=='OT1',0]='O' 
+        pdb_atom_names[pdb_atom_names[:, 0]=='OT2',0]='O'
     if fix_charmm_residues:
         pdb_atom_names[pdb_atom_names[:,1]=='HSD',1]='HID'
         pdb_atom_names[pdb_atom_names[:,1]=='HSE',1]='HIE'
@@ -599,6 +602,8 @@ def get_convolutions(dataset, pdb_atom_names,
                     pdb_atom_names[res_mask, 1]='HIE'
         #if any HIS are remaining it doesn't matter which because the H is dealt with above
         pdb_atom_names[pdb_atom_names[:,1]=='HIS',1]='HIE'
+    
+        
     if fix_h:
         pdb_atom_names[np.logical_and(pdb_atom_names[:,0]=='HB1', pdb_atom_names[:,1]=='MET'),0]='HB3'
         pdb_atom_names[np.logical_and(pdb_atom_names[:,0]=='HG1', pdb_atom_names[:,1]=='MET'),0]='HG3'
@@ -652,7 +657,14 @@ def get_convolutions(dataset, pdb_atom_names,
         pdb_atom_names[np.logical_and(pdb_atom_names[:,0]=='HG1', pdb_atom_names[:,1]=='GLN'),0]='HG3'
         pdb_atom_names[np.logical_and(pdb_atom_names[:,0]=='HB1', pdb_atom_names[:,1]=='TRP'),0]='HB3'
     #writes termini as H because we haven't loaded in termini parameters
-    atom_names = [[amber_atoms[res][atom],res, resid] if atom not in ['H2', 'H3'] else [amber_atoms[res]['H'], res, resid] for atom, res, resid in pdb_atom_names ]
+    atom_names = [
+        [
+            amber_atoms[res][atom if atom not in ['H2', 'H3'] else 'H'], 
+            res, 
+            resid
+        ]
+        for atom, res, resid in pdb_atom_names
+    ]
     p_atom_names = [[atom,res, resid] if atom not in ['H2', 'H3'] else ['H', res, resid] for atom, res, resid in pdb_atom_names ]
     
     #atom_names = [[amber_atoms[res][atom],res] for atom, res, resid in pdb_atom_names ]
@@ -1030,6 +1042,10 @@ def get_conv_pad_res(dataset, pdb_atom_names,
 
     if fix_terminal:#fix atoms and residues not in amber parameters
         pdb_atom_names[pdb_atom_names[:, 0]=='OXT',0]='O'
+        pdb_atom_names[pdb_atom_names[:, 0]=='OT',0]='O' 
+        pdb_atom_names[pdb_atom_names[:, 0]=='OT1',0]='O' 
+        pdb_atom_names[pdb_atom_names[:, 0]=='OT2',0]='O' ###
+
     if fix_charmm_residues:
         pdb_atom_names[pdb_atom_names[:, 1]=='HSD',0]='HID'
         pdb_atom_names[pdb_atom_names[:, 1]=='HSE',0]='HIE'

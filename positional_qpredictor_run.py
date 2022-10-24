@@ -47,7 +47,7 @@ def train_epoch(loss_function, train_loader, model, optimizer, device):
         atoms = atoms.to(device, torch.long)
         qcharges = qcharges.to(device, torch.float)
 
-        xyz = xyz.transpose(1,2)
+        #xyz = xyz.transpose(1,2)
         output = model(xyz, atoms)
         loss = loss_function(output, qcharges)
         optimizer.zero_grad()
@@ -68,7 +68,7 @@ def val_epoch(loss_function, val_loader, model, device):
             atoms = atoms.to(device, torch.long)
             qcharges = qcharges.to(device, torch.float)
 
-            xyz = xyz.transpose(1,2)
+            #xyz = xyz.transpose(1,2)
             output = model(xyz, atoms)
             loss = loss_function(output, qcharges)
             total_loss += loss.item()

@@ -1,4 +1,5 @@
-mport os
+#Imports 
+import os
 import pdb
 import wandb
 
@@ -28,9 +29,10 @@ from utils import chanset
 from utils.positional_qpredictor import *
 from molearn import Auto_potential, Autoencoder
 
+#Defining functions 
 
-@torch.no_grad()
-def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding_box=(0,0,1,1)):
+@torch.no_grad() 
+def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding_box=(0,0,1,1)): #background = energy calculated by the decoder
     x1, y1, x2, y2 = bounding_box
     x = np.linspace(x1, x2, size)
     y = np.linspace(y1, y2, size)
@@ -54,20 +56,26 @@ def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding
 
     return img
 
-def conformations_to_latent(network, train_loader, device):
+def conformations_to_latent(network, frames_encodings, num_atoms, train_loader, device): 
     z_list=[]
+
     with torch.no_grad():
-        for batch in tqdm(train_loader):
-            x = batch.to(device)
-            z = network.encode(x)
+        for batch in tqdm.tqdm(train_loader):
+            x, *_, indices = [t.to(device) for t in batch]
+            encodings = frames_encodings.pe[0, :, indices].T
+            f = encodings.unsqueeze(2) # (2B, D)
+            f = f.repeat_interleave(num_atoms, dim=2)
+            x_ = torch.concat((x, f), dim=1)
+        
+            z = network.encode(x_)
             z_list.append(z.cpu().squeeze(2))
     
     z_list = torch.cat(z_list)
     
     return z_list 
 
-def visualization(network, dataset, num_atoms, lf, train_loader, device, size=100, bounding_box=None, log_scale=False):
-    img_conf = conformations_to_latent(network, train_loader, device)
+def visualization(network, dataset, frames_encodings, num_atoms, lf, train_loader, device, size=100, bounding_box=None, log_scale=False):
+    img_conf = conformations_to_latent(network, frames_encodings, num_atoms, train_loader, device)
     
     if bounding_box is None:
         x1, y1 = img_conf.min(dim=0).values
@@ -90,7 +98,7 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
 
     img_array = visualize_energy(network, dataset, num_atoms, lf, device,
                                  size=size, bounding_box=(x1, y1, x2, y2))
-    
+
     plt.scatter(img_conf[:, 0], img_conf[:, 1], c=np.arange(len(img_conf)), alpha=0.5, s=1, cmap='PiYG')
     plt.imshow(img_array, extent=(x1, x2, y1, y2), origin='lower')
     plt.colorbar()
@@ -101,7 +109,7 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
     plt.savefig("/tmp/fig1.png")
     plt.close()
     img = Image.open("/tmp/fig1.png")
-            
+    
     if log_scale:
         plt.scatter(img_conf[:, 0], img_conf[:,1], c=np.arange(len(img_conf)), alpha=0.5, s=1, cmap='PiYG')
         plt.imshow(np.log(img_array), extent=(x1, x2, y1, y2), origin='lower')
@@ -115,45 +123,59 @@ def visualization(network, dataset, num_atoms, lf, train_loader, device, size=10
         img2 = Image.open("/tmp/fig2.png")
         return img, img2, img_conf, img_array, bb
     
-    return img, img_conf, img_array, bb 
+    return img, img_conf, img_array, bb
 
 
 # @profile
-def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
+def train_epoch(epoch, network, frames_encodings, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
     network.train()
     smoothed_loss = None
-    alpha = 0.9 
+    smoothing_coef = 0.9 
 
     batch_size = train_loader.batch_size // 2
+    print(len(train_loader))
 
-    for batch in tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
-        x, *_ = [t.to(device) for t in batch]
+    for batch in tqdm.tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
+        x, *_, indices = [t.to(device) for t in batch]
 
         x0, x1 = x.split(batch_size)
         optimiser.zero_grad()
 
+        encodings = frames_encodings.pe[0, :, indices].T
+        # print(encodings.shape)
+        encodings = encodings.unsqueeze(2) # (2B, D)
+        f0, f1 = encodings.split(batch_size)
+        f0 = f0.repeat_interleave(num_atoms, dim=2)
+        f1 = f1.repeat_interleave(num_atoms, dim=2)
+
+        # print(x0.shape)
+        # print(f0.shape)
+        x0_ = torch.concat((x0, f0), dim=1)
+        x1_ = torch.concat((x1, f1), dim=1) 
+
         #encode
-        z0 = network.encode(x0)
-        z1 = network.encode(x1)
+        z0 = network.encode(x0_)
+        z1 = network.encode(x1_)
 
         #interpolate
         alpha = torch.rand(batch_size, 1, 1).to(device)
         z_interpolated = (1-alpha)*z0 + alpha*z1
-
+    
         #decode
         out0 = network.decode(z0)[:,:,:num_atoms]
         out1 = network.decode(z1)[:,:,:num_atoms]
         out_interpolated = network.decode(z_interpolated)[:,:,:num_atoms]
-
+    
         #calculate MSE
         mse_loss_0 = ((x0-out0)**2).mean() # reconstructive loss (Mean square error)
         mse_loss_1 = ((x1-out1)**2).mean() # reconstructive loss (Mean square error)
+
         out0 *= dataset.stdval.reshape(3, 1).to(device)
         out1 *= dataset.stdval.reshape(3, 1).to(device)
         out_interpolated *= dataset.stdval.reshape(3, 1).to(device)
         
         mse_loss = (mse_loss_0 + mse_loss_1) / 2
-
+        
         #calculate physics for interpolated samples
         bond_energy, angle_energy, torsion_energy, NB_energy = loss_function.get_loss(out_interpolated)
         
@@ -166,10 +188,11 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
             scale = args.scale*mse_loss.item()/(bond_energy.item()+angle_energy.item()+torsion_energy.item()+NB_energy.item())
 
         network_loss = mse_loss + scale*(bond_energy + angle_energy + torsion_energy + NB_energy)
+
         if smoothed_loss is None: 
             smoothed_loss = network_loss.item()
         else: 
-            smoothed_loss = (1-alpha)*network_loss.item() + alpha*smoothed_loss
+            smoothed_loss = (1-smoothing_coef)*network_loss.item() + smoothing_coef*smoothed_loss
 
 
         if verbose:
@@ -192,7 +215,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
     return smoothed_loss, network_loss
 
 # @profile
-def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader, 
+def validation(epoch, network, frames_encodings, test0, test1, dataset, num_atoms, dataloader, 
                loss_function, device, checkpoints_dir, pdbs_dir, verbose=False, img_size=100):
     #encode test with each network
     #Not training so switch to eval mode
@@ -204,6 +227,7 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
     with torch.no_grad(): # don't need gradients for this bit
         test0_z = network.encode(test0.float())
         test1_z = network.encode(test1.float())
+
         #interpolate between the encoded Z space for each network between test0 and test1
         for idx, t in enumerate(np.linspace(0, 1, 20)):
             point = float(t)*test0_z + (1-float(t))*test1_z
@@ -211,8 +235,8 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
             interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
         interpolation_out = interpolation_out.swapaxes(1,2)
         interpolation_out*= dataset.stdval
-        
-    img, log_img, points, energy_array, bb = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
+    
+    img, log_img, points, energy_array, bb = visualization(network, dataset, frames_encodings, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
     #np.save(f'{checkpoints_dir}/energy_{epoch}.npy', energy_array)
     #np.save(f'{checkpoints_dir}/bb_x1x2y1y2_{epoch}.npy', bb)
     
@@ -222,11 +246,11 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
     
     #np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.npy', points)
     
+    #save interpolations
     interpolation_out = interpolation_out.numpy()
     dataset.write_pdb(interpolation_out)
 
     return points, interpolated_points, energy_array, bb, interpolation_out
-
 
 def create_dirs(args):
     root = os.path.join(args.output, args.experiment_name)
@@ -261,7 +285,6 @@ def main(args):
     root, checkpoints_dir, checkpoints_extra_dir, pdbs_dir = create_dirs(args)
     if args.extra:
         checkpoints_dir=checkpoints_extra_dir
-
     
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     num_workers = args.num_workers
@@ -291,7 +314,7 @@ def main(args):
                                 root = args.output,
                                 exp_name = args.experiment_name,
                                 extra = args.extra,
-                                return_index=False
+                                return_index=True
                                 )
 
     print('Dataset is ', len(dataset), ' frames long')
@@ -324,9 +347,22 @@ def main(args):
         device=device
     )
 ###
-    test0 = dataset[test0].to(device)
-    test1 = dataset[test1].to(device)    
+    frames_encodings = PositionalEncoding(d_model=32, max_len=200000)
 
+    test0_encoding = frames_encodings.pe[0, :, test0].unsqueeze(1).T
+    test0_encoding = test0_encoding.unsqueeze(2)
+    test0_ = test0_encoding.repeat_interleave(num_atoms, dim=2)
+
+    test1_encoding = frames_encodings.pe[0, :, test0].unsqueeze(1).T
+    test1_encoding = test1_encoding.unsqueeze(2)
+    test1_ = test1_encoding.repeat_interleave(num_atoms, dim=2)
+
+    test0 = torch.concat((dataset[test0][0].unsqueeze(0), test0_), dim=1)
+    test1 = torch.concat((dataset[test1][0].unsqueeze(0), test1_), dim=1) 
+
+    test0 = test0.to(device)
+    test1 = test1.to(device)    
+    frames_encodings = frames_encodings.to(device)
 ###
     train_loader = torch.utils.data.DataLoader(dataset,
                 batch_size=2 * batch_size, shuffle=True, drop_last=True, num_workers=num_workers)
@@ -335,7 +371,7 @@ def main(args):
     val_loader = torch.utils.data.DataLoader(dataset,
                 batch_size=2 * batch_size, shuffle=False, drop_last=False, num_workers=num_workers)
 
-    network = Autoencoder(in_channels=3, m=2.0, latent_z=2, r=2, sigmoid=False, BN=True, parallel_mode=args.parallel).to(device)
+    network = Autoencoder(in_channels=35, m=2.0, latent_z=2, r=2, sigmoid=False, BN=True, parallel_mode=args.parallel).to(device)
     
 
     if args.extra_path:
@@ -352,31 +388,31 @@ def main(args):
     best_loss_name = None
     
     #training loop
-    for epoch in trange(200, desc="Training..."):
+    for epoch in trange(epochs, desc="Training..."):
         smoothed_loss, network_loss = train_epoch(
             epoch=epoch,
             network=network,
+            frames_encodings=frames_encodings,
             train_loader=train_loader,
             loss_function=lf,
             optimiser=optimizer,
             num_atoms=num_atoms,
             dataset=dataset,
             device=device,
-            verbose=args.wandb,
+            verbose=args.verbose,
         )
-        # exit(0)
 
-        #save interpolations between test0 and test1 every 5 epochs
-        #if (epoch + 1) % 5 == 0:
         (
             points, 
             interpolated_points, 
             energy_array, 
             bb, 
             interpolation_out
+
         ) = validation(
             epoch=epoch,
             network=network,
+            frames_encodings=frames_encodings,
             test0=test0,
             test1=test1,
             dataset=dataset,
@@ -384,13 +420,12 @@ def main(args):
             dataloader=val_loader,
             loss_function=lf,
             device=device,
-            img_size=100,
             pdbs_dir=pdbs_dir,
             checkpoints_dir=checkpoints_dir,
-            verbose=args.wandb,
+            img_size=100,
+            verbose=args.verbose,
         )
-    
-        
+
         if smoothed_loss < best_loss: 
             best_loss = smoothed_loss
             if best_loss_name is not None: 
@@ -403,7 +438,6 @@ def main(args):
             np.save(f'{checkpoints_dir}/energy.npy', energy_array)
             np.save(f'{checkpoints_dir}/decoded_coord.npy', interpolation_out)
 
-
         torch.save(network.state_dict(), f'{checkpoints_dir}/last_checkpoint.pth')
         
         #if extra training 
@@ -413,6 +447,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+
+
     parser.add_argument("--output", "-o", type=str, default="/home/ebam/kacher1/molearn/DATA")
     parser.add_argument("--experiment_name", "-e", type=str, default="Kv1_qpositional")
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
@@ -439,6 +475,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--parallel", "-p", action="store_true", default=False)
     parser.add_argument("--scale", "-l", type=float, default=0.1)
+
 
     args = parser.parse_args()
     main(args)
