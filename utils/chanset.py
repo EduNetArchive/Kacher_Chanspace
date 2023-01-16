@@ -15,7 +15,7 @@ from MDAnalysis.analysis import diffusionmap, align, rms
 class QDataset(Dataset):
     def __init__(self, frames, qcharge_path=None, topology=None, atoms='protein and not name H*', 
                         skip=1, start=0, stop=-1, calculate_statistics=True, meanval=0, stdval=1, in_memory=False, 
-                        transform=False, plane='xy', root='/home/ebam/kacher1/molearn/DATA', exp_name='new_exp', extra=False):
+                        transform=False, plane='xy', return_index=False, root='/home/ebam/kacher1/molearn/DATA', exp_name='new_exp', extra=False):
         
         self.frames = frames
         self.qcharge_path = qcharge_path
@@ -32,6 +32,7 @@ class QDataset(Dataset):
         self.root = root
         self.exp_name = exp_name
         self.extra = extra
+        self.return_index = return_index
     
         if self.extra: 
             self.coordinates = np.load(f'{self.root}/{self.exp_name}/positions.npy')
@@ -40,10 +41,15 @@ class QDataset(Dataset):
             else: 
                 self.u = mda.Universe(self.topology, self.frames)
             self.selection = self.u.select_atoms(self.atoms)
+            self.selection.write(f'/tmp/selection_{self.exp_name}.pdb')
+            
             self.n_residues = self.selection.n_residues
             self.n_atoms = self.selection.n_atoms
 
-            self.atoms_names = self.selection.atoms.names 
+            self.atoms_names = self.selection.atoms.names
+            self.resnames = self.selection.resnames
+            self.resids = self.selection.resids
+
             with open(f'{self.root}/{self.exp_name}/unique_atoms_to_labels.json', 'r') as file: 
                 self.atomname_to_label =  json.load(file)
             labelled_atoms = []
@@ -69,7 +75,7 @@ class QDataset(Dataset):
                 raise ValueError('Sorry, cannot create a dataset, check the files or readme!') 
 
     # preparing trajectory if it was not done in advance         
-            if transform and topology is None: # BE CAREFUL WITH PDB FORMAT!!!!
+            if transform and isinstance(self.frames, str) and self.frames.split('.')[-1] == 'pdb' or (transform and self.frames[0].endswith('pdb')): # BE CAREFUL WITH PDB FORMAT!!!!
                 workflow = (mda.transformations.center_in_box(u.select_atoms(self.atoms), center='mass'),
                             mda.transformations.fit_rot_trans(u.select_atoms(self.atoms), u.select_atoms(self.atoms), plane=self.plane))
                 for ts in u.trajectory[self.start:self.stop:self.skip]:
@@ -79,7 +85,8 @@ class QDataset(Dataset):
             elif transform:
                 workflow = (mda.transformations.unwrap(u.atoms), 
                         mda.transformations.center_in_box(u.select_atoms(self.atoms), center='mass'),
-                        mda.transformations.wrap(u.select_atoms(self.atoms), compound='molecules'),
+                        mda.transformations.wrap(u.select_atoms(self.atoms), compound='fragments'), #compound='molecules'),
+                        #compound ({'atoms', 'group', 'residues', 'segments', 'fragments'}, optional) – The group which will be kept together through the shifting process.
                         mda.transformations.fit_rot_trans(u.select_atoms(self.atoms), u.select_atoms(self.atoms), plane=self.plane)) 
                 for ts in u.trajectory[self.start:self.stop:self.skip]: 
                     for transformation in workflow:
@@ -104,13 +111,17 @@ class QDataset(Dataset):
                 self.coordinates = coord 
             #as in MDAnalysis, check https://docs.mdanalysis.org/2.1.0/documentation_pages/selections.html
             #self.positions = np.array([(self.u.trajectory.time, self.selection.atoms.positions) for ts in u.trajectory])
+                np.save(f'{self.root}/{self.exp_name}/positions.npy', self.coordinates)
             
-            np.save(f'{self.root}/{self.exp_name}/positions.npy', self.coordinates)
+            self.selection.write(f'/tmp/selection_{self.exp_name}.pdb')
+
     # for practical info         
             self.atoms_names = self.selection.atoms.names  
             #np.save(f'{self.self.root}/{self.exp_name}/atoms_names.npy', self.atoms.names)
             self.n_atoms = self.selection.n_atoms
             self.n_residues = self.selection.n_residues 
+            self.resnames = self.selection.resnames
+            self.resids = self.selection.resids
     # preparing for positional embedding 
             self.atomname_to_label = dict()
             unique_names = np.unique(self.atoms_names) 
@@ -164,7 +175,7 @@ class QDataset(Dataset):
         else:
             raise ValueError('No information about qcharges was provided, check the positional arguments')
 # calculating statistics    
-        if os.path.exists(f'{root}/mean_std.npy'):
+        if os.path.exists(f'{root}/meanval_stdval.npy'):
             self.meanval, self.stdval = np.load(f'{self.root}/{self.exp_name}_{self.start}_{self.stop}_{self.skip}.npy') 
         elif calculate_statistics:
             self.meanval, self.stdval = self.calculate_mean_std()
@@ -177,20 +188,28 @@ class QDataset(Dataset):
         else:
             #self.selection.universe.trajectory[item]
             frame_xyz = torch.tensor(self.coordinates[item])
-
-        frame_xyz = (frame_xyz - self.meanval)/self.stdval
         
-        if self.qcharges is None: 
-            return frame_xyz, self.labelled_atoms 
-        else: 
-            qcharge = self.qcharges[item] 
-            return frame_xyz, self.labelled_atoms, qcharge 
+        frame_xyz = frame_xyz.transpose(0, 1)
+        # if self.calculate_statistics:
+        #     frame_xyz = (frame_xyz - self.meanval.reshape(3, 1)) / self.stdval.reshape(3, 1)
+        frame_xyz = (frame_xyz - self.meanval) / self.stdval
+        
+        to_return = [frame_xyz, self.labelled_atoms]
+        if self.qcharges is not None:
+            qcharge = self.qcharges[item]  
+            to_return.append(qcharge)
+        if self.return_index:
+            to_return.append(item)
+    
+        return to_return
+
 # functions 
     def __len__(self):
         if self.qcharge_path: 
-            return min(len(self.u.trajectory[::self.skip]), len(self.qcharges))
+            return min(len(self.coordinates), len(self.qcharges))
         else: 
-            return len(self.u.trajectory[::self.skip])
+            #return len(self.u.trajectory[::self.skip])
+            return len(self.coordinates)
             
     def calculate_mean_std(self):
         summ = 0 
@@ -200,17 +219,20 @@ class QDataset(Dataset):
 
         # if self.qcharges is None:
         for item, *_ in tqdm.tqdm(dataloader, desc="Calculating dataset statistics..."):
-            sqrsum += (item**2).sum(dim=(0,1))
-            summ += item.sum(dim=(0,1))
+            sqrsum += (item**2).sum(dim=(0,2))
+            summ += item.sum(dim=(0,2))
         # else:s
         #     for item, _, _ in tqdm.tqdm(dataloader, desc="Calculating dataset statistics..."):
         #         sqrsum += (item**2).sum(dim=(0,1))
         #         summ += item.sum(dim=(0,1))
           
-        N = len(self) * item.shape[1] 
+        N = len(self) * item.shape[2] 
 
         meanval = summ / N
         stdval = np.sqrt(sqrsum / N - meanval**2)
+
+        meanval = meanval.reshape(3,1)
+        stdval = stdval.reshape(3,1)
 
         np.save(f'{self.root}/{self.exp_name}_{self.start}_{self.stop}_{self.skip}.npy', (meanval, stdval))
        
@@ -218,9 +240,14 @@ class QDataset(Dataset):
 
     def min_max_av_qcharge(self): 
         min_q = np.min(self.qcharges)
+        min_q_index = np.argmin(self.qcharges)
+
         max_q = np.max(self.qcharges)
+        max_q_index = np.argmax(self.qcharges)
+
         av_q = np.mean(self.qcharges)
-        return min_q, max_q, av_q 
+        
+        return  min_q_index, min_q,  max_q_index, max_q, av_q 
     
     def check_rmsd(self):
         R = rms.RMSD(self.u,  # universe to align
@@ -259,6 +286,19 @@ class QDataset(Dataset):
         value = np.max(df2.value)
 
         return test0_idx, test1_idx, value
+    
+    def write_pdb(self, coordinates):
+        # self.n_residues = self.selection.n_residues
+        # self.n_atoms = self.selection.n_atomsn_residues = 
+        # self.resids = self.selection.resids
+        coordinates = coordinates.swapaxes(1,2)
+
+        new = mda.Universe(f'/tmp/selection_{self.exp_name}.pdb', coordinates)
+        same_selection = new.select_atoms(self.atoms)
+
+        with mda.Writer(f'{self.root}/{self.exp_name}/saved_pdbs.pdb') as W:
+            for ts in new.trajectory:
+                W.write(same_selection)
 
 if __name__ == "__main__":
     path = '/home/ebam/kacher1/Files/Kv1.2.VSD/preprocessed_pdb_traj'

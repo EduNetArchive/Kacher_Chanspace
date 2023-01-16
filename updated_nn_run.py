@@ -25,9 +25,14 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from utils import chanset
-from utils.positional_qpredictor import *
-from molearn import Auto_potential, Autoencoder
+from utils.Qcalc import Qcalc
+from utils import chanset
 
+import molearn.protein_handler_new 
+from molearn.loss_functions_new import Auto_potential
+from molearn import Autoencoder
+
+os.environ["CUDA_LAUNCH_BLOKING"] = "1"
 
 @torch.no_grad()
 def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding_box=(0,0,1,1)):
@@ -57,7 +62,7 @@ def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding
 def conformations_to_latent(network, train_loader, device):
     z_list=[]
     with torch.no_grad():
-        for batch in tqdm.tqdm(train_loader):
+        for batch in tqdm(train_loader):
             x, *_ = batch
             x = x.to(device)
             z = network.encode(x)
@@ -127,7 +132,7 @@ def train_epoch(epoch, network, train_loader, loss_function, optimiser, num_atom
 
     batch_size = train_loader.batch_size // 2
 
-    for batch in tqdm.tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
+    for batch in tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
         x, *_ = [t.to(device) for t in batch]
 
         x0, x1 = x.split(batch_size)
@@ -212,7 +217,10 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
             interpolation_out[idx] = network.decode(point)[:,:,:num_atoms].squeeze(0).permute(1,0).cpu().data
         interpolation_out = interpolation_out.swapaxes(1,2)
         interpolation_out*= dataset.stdval
-        
+        interpolation_out = interpolation_out.numpy()
+
+    interpolation_out = interpolation_out.clip(min=-999, max=9999)
+    
     img, log_img, points, energy_array, bb = visualization(network, dataset, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
     #np.save(f'{checkpoints_dir}/energy_{epoch}.npy', energy_array)
     #np.save(f'{checkpoints_dir}/bb_x1x2y1y2_{epoch}.npy', bb)
@@ -223,8 +231,10 @@ def validation(epoch, network, test0, test1, dataset, num_atoms, dataloader,
     
     #np.save(f'{checkpoints_dir}/frames2D_epoch_{epoch:0>4}.npy', points)
     
-    interpolation_out = interpolation_out.numpy()
-    dataset.write_pdb(interpolation_out)
+    try: 
+        dataset.write_pdb(interpolation_out)
+    except ValueError: 
+        print('Ooops ValueError, continue without writing coordinates')
 
     return points, interpolated_points, energy_array, bb, interpolation_out
 
@@ -430,9 +440,9 @@ if __name__ == "__main__":
     parser.add_argument("--train_skip", "-s", type=int, default=1)
     parser.add_argument("--transform", action="store_true", default=False)
     parser.add_argument("--plane", type=str, default="xy")
-    parser.add_argument("--val_start", type=int, default=0)
-    parser.add_argument("--val_stop", type=int, default=-1)
-    parser.add_argument("--val_skip", "-k", type=int, default=1)
+    # parser.add_argument("--val_start", type=int, default=0)
+    # parser.add_argument("--val_stop", type=int, default=-1)
+    # parser.add_argument("--val_skip", "-k", type=int, default=1)
 
     parser.add_argument("--num_workers", "-w", type=int, default=8)
     parser.add_argument("--batchsize", "-b", type=int, default=8)

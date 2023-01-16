@@ -28,8 +28,14 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from utils import chanset
-from utils.positional_qpredictor import *
-from molearn import Auto_potential, Autoencoder
+from utils.Qcalc import Qcalc
+from utils import chanset
+
+import molearn.protein_handler_new 
+from molearn.loss_functions_new import Auto_potential
+from molearn import Autoencoder
+
+os.environ["CUDA_LAUNCH_BLOKING"] = "1"
 
 #Defining functions 
 
@@ -59,7 +65,7 @@ def visualize_energy(network, dataset, num_atoms, lf, device, size=100, bounding
     return img
 
 @torch.no_grad()
-def visualize_qcharge(network, qpredictor, num_atoms, labelled_atoms, device, batchsize, size=100, bounding_box=(0,0,1,1)): #background = qcharges
+def visualize_qcharge(network, qpredictor, num_atoms, device, size=100, bounding_box=(0,0,1,1)): #background = qcharges
     x1, y1, x2, y2 = bounding_box
     x = np.linspace(x1, x2, size)
     y = np.linspace(y1, y2, size)
@@ -68,14 +74,14 @@ def visualize_qcharge(network, qpredictor, num_atoms, labelled_atoms, device, ba
     z = z.reshape(size**2, 2, 1)
 
     qcharges_all = []
-    for i in trange(0, len(z), batchsize):
-        z_batch = z[i:(i+batchsize)]
+    for i in trange(len(z)):
+        z_batch = z[i:(i+1)]
         z_batch=torch.tensor(z_batch).float().to(device)
         
         out = network.decode(z_batch)[:, :, :num_atoms]
         # out *= dataset.stdval.reshape(3, 1).to(device)
         
-        q_out = qpredictor(out, labelled_atoms[:out.shape[0]]) 
+        q_out = qpredictor(out) 
         qcharges_all.append(q_out.detach().cpu().numpy())
     
     q_array = np.hstack(qcharges_all)
@@ -86,7 +92,7 @@ def visualize_qcharge(network, qpredictor, num_atoms, labelled_atoms, device, ba
 def conformations_to_latent(network, train_loader, device): 
     z_list=[]
     with torch.no_grad():
-        for batch in tqdm.tqdm(train_loader):
+        for batch in tqdm(train_loader):
             x, *_ = batch
             x = x.to(device)
             z = network.encode(x)
@@ -96,7 +102,7 @@ def conformations_to_latent(network, train_loader, device):
     
     return z_list 
 
-def visualization(network, dataset, qpredictor, num_atoms, labelled_atoms, lf, train_loader, device, batchsize, size=100, bounding_box=None, log_scale=False):
+def visualization(network, dataset, qpredictor, num_atoms, lf, train_loader, device, size=100, bounding_box=None, log_scale=False):
     img_conf = conformations_to_latent(network, train_loader, device)
     
     if bounding_box is None:
@@ -132,7 +138,7 @@ def visualization(network, dataset, qpredictor, num_atoms, labelled_atoms, lf, t
     plt.close()
     img = Image.open("/tmp/fig1.png")
 
-    q_array = visualize_qcharge(network, qpredictor, num_atoms, labelled_atoms, device, batchsize, size=100, bounding_box=(0,0,1,1))
+    q_array = visualize_qcharge(network, qpredictor, num_atoms, device, size=100, bounding_box=(0,0,1,1))
     plt.scatter(img_conf[:, 0], img_conf[:, 1], c=np.arange(len(img_conf)), alpha=0.5, s=1, cmap='PiYG')
     plt.imshow(q_array, extent=(x1, x2, y1, y2), origin='lower')
     plt.colorbar()
@@ -158,25 +164,23 @@ def visualization(network, dataset, qpredictor, num_atoms, labelled_atoms, lf, t
 
 
 # @profile
-def train_epoch(epoch, network, qpredictor, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
+def train_epoch(epoch, network, qpredictor, qregressor, batch_size, train_loader, loss_function, optimiser, num_atoms, dataset, device, verbose=False):
     network.train()
     smoothed_loss = None
     smoothing_coef = 0.9 
 
     batch_size = train_loader.batch_size // 2
-    print(len(train_loader))
+    #print(len(train_loader))
 
-    for batch in tqdm.tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
-        x, labelled_atoms, qcharges = [t.to(device) for t in batch]
+    for batch in tqdm(train_loader, desc=f"Training epoch #{epoch}...", leave=False):
+        x, *_ = [t.to(device) for t in batch]
 
         x0, x1 = x.split(batch_size)
-        q0, q1 = qcharges.split(batch_size)
-        labelled_atoms0, labelled_atoms1 = labelled_atoms.split(batch_size)
         optimiser.zero_grad()
 
-        q0_predicted = qpredictor(x0, labelled_atoms0)
-        q1_predicted = qpredictor(x1, labelled_atoms1)
-
+        q0_predicted = qpredictor(x0)
+        q1_predicted = qpredictor(x1)
+    
         #enc
         #encode
         z0 = network.encode(x0)
@@ -185,7 +189,11 @@ def train_epoch(epoch, network, qpredictor, train_loader, loss_function, optimis
         #interpolate
         alpha = torch.rand(batch_size, 1, 1).to(device)
         z_interpolated = (1-alpha)*z0 + alpha*z1
-        q_interpolated = (1-alpha)*q0 + alpha*q1
+        q_interpolated = (1-alpha)*q0_predicted + alpha*q1_predicted
+
+        
+        q_to_line0 = qregressor(z0.reshape(batch_size, 2))
+        q_to_line1 = qregressor(z1.reshape(batch_size, 2))
 
         #decode
         out0 = network.decode(z0)[:,:,:num_atoms]
@@ -194,29 +202,24 @@ def train_epoch(epoch, network, qpredictor, train_loader, loss_function, optimis
         
         #q_out0 = qpredictor(out0, labelled_atoms0)
         #q_out1 = qpredictor(out1, labelled_atoms1)
-        q_out_interpolated = qpredictor(out_interpolated, labelled_atoms0)
+        q_out_interpolated = qpredictor(out_interpolated)
     
         #calculate MSE
         mse_loss_0 = ((x0-out0)**2).mean() # reconstructive loss (Mean square error)
         mse_loss_1 = ((x1-out1)**2).mean() # reconstructive loss (Mean square error)
 
+        q_lin_loss_0 = ((q_to_line0-q0_predicted)**2).mean()
+        q_lin_loss_1 = ((q_to_line1-q1_predicted)**2).mean() 
+        q_lin_loss = (q_lin_loss_0 + q_lin_loss_1) / 2 
+    
         if not torch.all(torch.isfinite(mse_loss_0)):
             raise ValueError(f"mse_0 is NaN/inf!!!")
         elif not torch.all(torch.isfinite(mse_loss_1)):
             raise ValueError(f"mse_1 is NaN/inf!!!")
-
-        q0_mse = ((q0-q0_predicted)**2).mean()
-        q1_mse = ((q1-q1_predicted)**2).mean()
-        q_loss = (q0_mse + q1_mse) / 2
         
         out0 *= dataset.stdval.reshape(3, 1).to(device)
         out1 *= dataset.stdval.reshape(3, 1).to(device)
         out_interpolated *= dataset.stdval.reshape(3, 1).to(device)
-        
-        if not torch.all(torch.isfinite(q0)) or not torch.all(torch.isfinite(q1)):
-            print(q0)
-            print(q1)
-            raise ValueError("q0 q1 is NaN!!!!!!!")
 
         if not torch.all(torch.isfinite(q_interpolated)):
             raise ValueError(f"q_interpolated is NaN/inf!!!")
@@ -239,12 +242,11 @@ def train_epoch(epoch, network, qpredictor, train_loader, loss_function, optimis
         
         with torch.no_grad():
             scale = args.scale*mse_loss.item()/(bond_energy.item()+angle_energy.item()+torsion_energy.item()+NB_energy.item())
-
         
         if args.no_phys:
-            network_loss = mse_loss + args.q_scale*q_mse_loss + args.q_scale*q_loss 
+            network_loss = mse_loss + args.q_scale*q_mse_loss + args.q_scale*q_lin_loss
         else: 
-            network_loss = mse_loss + args.q_scale*q_mse_loss + args.q_scale*q_loss + scale*(bond_energy + angle_energy + torsion_energy + NB_energy)
+            network_loss = mse_loss + args.q_scale*q_mse_loss + args.q_scale*q_lin_loss + scale*(bond_energy + angle_energy + torsion_energy + NB_energy)
 
         if smoothed_loss is None: 
             smoothed_loss = network_loss.item()
@@ -255,6 +257,7 @@ def train_epoch(epoch, network, qpredictor, train_loader, loss_function, optimis
             wandb.log(dict(
                 mse_loss=mse_loss.item(),
                 q_mse = q_mse_loss.item(),
+                q_reg_loss = q_lin_loss.item(),
                 phys_loss=(bond_energy + angle_energy + torsion_energy + NB_energy).item(),
                 bond_energy=bond_energy.item(),
                 angle_energy=angle_energy.item(),
@@ -266,10 +269,11 @@ def train_epoch(epoch, network, qpredictor, train_loader, loss_function, optimis
         losses = dict(
             mse_loss=mse_loss, 
             q_mse_loss=q_mse_loss, 
+            q_lin_loss=q_lin_loss,
             bond_energy=bond_energy, 
             angle_energy=angle_energy, 
             torsion_energy=torsion_energy, 
-            NB_energ=NB_energy,
+            NB_eonerg=NB_energy,
             network_los=network_loss,
         )
 
@@ -292,13 +296,12 @@ def train_epoch(epoch, network, qpredictor, train_loader, loss_function, optimis
         #advance the network weights
         optimiser.step()
 
-
         
     return smoothed_loss, network_loss
 
 # @profile
-def validation(epoch, network, qpredictor, test0, test1, dataset, num_atoms, labelled_atoms, dataloader, 
-               loss_function, device, checkpoints_dir, pdbs_dir, batchsize, verbose=False, img_size=100):
+def validation(epoch, network, qpredictor, test0, test1, dataset, num_atoms, dataloader, 
+               loss_function, device, checkpoints_dir, verbose=False, img_size=100):
     #encode test with each network
     #Not training so switch to eval mode
     network.eval()
@@ -321,7 +324,7 @@ def validation(epoch, network, qpredictor, test0, test1, dataset, num_atoms, lab
 
     interpolation_out = interpolation_out.clip(min=-999, max=9999)
     
-    img, log_img, points, energy_array, bb, img_q = visualization(network, dataset, qpredictor, num_atoms, labelled_atoms, loss_function, dataloader, device, batchsize, size=img_size, log_scale=True)
+    img, log_img, points, energy_array, bb, img_q = visualization(network, dataset, qpredictor, num_atoms, loss_function, dataloader, device, size=img_size, log_scale=True)
     #np.save(f'{checkpoints_dir}/energy_{epoch}.npy', energy_array)
     #np.save(f'{checkpoints_dir}/bb_x1x2y1y2_{epoch}.npy', bb)
     
@@ -338,7 +341,6 @@ def validation(epoch, network, qpredictor, test0, test1, dataset, num_atoms, lab
         dataset.write_pdb(interpolation_out)
     except ValueError: 
         print('Ooops ValueError, continue without writing coordinates')
-
 
     return points, interpolated_points, energy_array, bb, img_q, interpolation_out
 
@@ -363,16 +365,16 @@ def create_dirs(args):
     # if not os.path.exists(conformations_dir):
     #     os.mkdir(conformations_dir)
 
-    if not os.path.exists(pdbs_dir):
-        os.mkdir(pdbs_dir)
+    # if not os.path.exists(pdbs_dir):
+    #     os.mkdir(pdbs_dir)
 
     # if not os.path.exists(weights_dir):
     #     os.mkdir(weights_dir)
 
-    return root, checkpoints_dir, checkpoints_extra_dir, pdbs_dir
+    return root, checkpoints_dir, checkpoints_extra_dir
 
 def main(args):
-    root, checkpoints_dir, checkpoints_extra_dir, pdbs_dir = create_dirs(args)
+    root, checkpoints_dir, checkpoints_extra_dir = create_dirs(args)
     if args.extra:
         checkpoints_dir=checkpoints_extra_dir
     
@@ -428,7 +430,7 @@ def main(args):
     
     pdb_atom_names = np.vstack([dataset.atoms_names, dataset.resnames, dataset.resids])
     pdb_atom_names = pdb_atom_names.T
-
+    
     lf = Auto_potential(
         frame=dataset[0][0]*dataset.stdval.reshape(3, 1),
         pdb_atom_names=pdb_atom_names, 
@@ -440,16 +442,35 @@ def main(args):
     test0 = test0.to(device)
     test1 = test1.to(device)
     
-    train_loader = torch.utils.data.DataLoader(dataset,
+    if args.filter: 
+        filter = np.load(args.filter)
+        train_loader = torch.utils.data.DataLoader(dataset, batch_size=2 * batch_size, 
+                                                   sampler=torch.utils.data.SubsetRandomSampler(filter), 
+                                                   drop_last=True, num_workers=num_workers)
+    else: 
+        train_loader = torch.utils.data.DataLoader(dataset,
                 batch_size=2 * batch_size, shuffle=True, drop_last=True, num_workers=num_workers)
-    print(len(train_loader))
+    #print(len(train_loader))
 
-    val_loader = torch.utils.data.DataLoader(dataset,
+    if args.val_filter: 
+        filter = np.load(args.val_filter)
+        val_loader = torch.utils.data.DataLoader(dataset, batch_size=2 * batch_size, 
+                                                sampler=filter, drop_last=False, num_workers=num_workers)
+    else:
+        val_loader = torch.utils.data.DataLoader(dataset,
                 batch_size=2 * batch_size, shuffle=False, drop_last=False, num_workers=num_workers)
 
     network = Autoencoder(m=2.0, latent_z=2, r=2, sigmoid=False, BN=True, parallel_mode=args.parallel).to(device)
     
-    qpredictor = PositionalQPredictor(num_unique_atoms=num_unique_atoms, depth=4, scale=2, channels=32, res_n=2, droprate=None, batch_norm=True).to(device)
+    # when choosing with mda directly set id+1 to get the same positions
+    
+    qpredictor = Qcalc(ghost_atoms=[286, 936, 1707, 67, 1163, 1469], 
+                       key_atoms=[2086, 2145, 2204, 2264, 2328, 2379], 
+                       alpha=1.80654,
+                       beta=0.0949,
+                       stdval=dataset.stdval).to(device)
+
+    qregressor = nn.Linear(in_features=2, out_features=1).to(device)
     
 
     if args.extra_path:
@@ -471,6 +492,8 @@ def main(args):
             epoch=epoch,
             network=network,
             qpredictor=qpredictor,
+            qregressor=qregressor,
+            batch_size=batch_size,
             train_loader=train_loader,
             loss_function=lf,
             optimiser=optimizer,
@@ -496,13 +519,10 @@ def main(args):
             test1=test1,
             dataset=dataset,
             num_atoms=num_atoms,
-            labelled_atoms=labelled_atoms,
             dataloader=val_loader,
             loss_function=lf,
             device=device,
-            pdbs_dir=pdbs_dir,
             checkpoints_dir=checkpoints_dir,
-            batchsize=batch_size,
             img_size=100,
             verbose=args.verbose,
         )
@@ -547,13 +567,15 @@ if __name__ == "__main__":
     parser.add_argument("--train_skip", "-s", type=int, default=1)
     parser.add_argument("--transform", action="store_true", default=False)
     parser.add_argument("--plane", type=str, default="xy")
-    parser.add_argument("--val_start", type=int, default=0)
-    parser.add_argument("--val_stop", type=int, default=-1)
-    parser.add_argument("--val_skip", "-k", type=int, default=1)
+    #parser.add_argument("--val_start", type=int, default=0)
+    #parser.add_argument("--val_stop", type=int, default=-1)
+    #parser.add_argument("--val_skip", "-k", type=int, default=1)
 
     parser.add_argument("--num_workers", "-w", type=int, default=8)
     parser.add_argument("--batchsize", "-b", type=int, default=8)
     parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--filter", "-f", type=str, default=None)
+    parser.add_argument("--val_filter", "-r", type=str, default=None)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--parallel", "-p", action="store_true", default=False)
     parser.add_argument("--scale", "-l", type=float, default=0.1)
